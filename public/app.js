@@ -1,0 +1,657 @@
+const state = {
+  draws: [],
+  analysis: null,
+  recommendations: [],
+  backtest: null,
+  nextNumberRanking: [],
+  customRecommendation: null,
+  targetRange: null
+};
+
+const summaryCardsEl = document.getElementById("summary-cards");
+const quickPicksEl = document.getElementById("quick-picks");
+const numberRankingEl = document.getElementById("number-ranking");
+const customRecommendationEl = document.getElementById("custom-recommendation");
+const analysisCaptionEl = document.getElementById("analysis-caption");
+const syncCaptionEl = document.getElementById("sync-caption");
+const statusMessageEl = document.getElementById("status-message");
+const targetCaptionEl = document.getElementById("target-caption");
+const targetHelpEl = document.getElementById("target-help");
+const targetGenerateButtonEl = document.getElementById("target-generate-button");
+const targetHit3RangeEl = document.getElementById("target-hit3-range");
+const targetHit3InputEl = document.getElementById("target-hit3-input");
+const targetFixedNumberEl = document.getElementById("target-fixed-number");
+const syncButtonEl = document.getElementById("sync-button");
+const avgSumEl = document.getElementById("avg-sum");
+const avgOddEl = document.getElementById("avg-odd");
+const avgAcEl = document.getElementById("avg-ac");
+const avgLowEl = document.getElementById("avg-low");
+const sectionBarsEl = document.getElementById("section-bars");
+const topPairsEl = document.getElementById("top-pairs");
+const carryOverEl = document.getElementById("carry-over");
+const endDigitBarsEl = document.getElementById("end-digit-bars");
+const consecutiveSummaryEl = document.getElementById("consecutive-summary");
+const hotNumbersEl = document.getElementById("hot-numbers");
+const coldNumbersEl = document.getElementById("cold-numbers");
+const frequencyGridEl = document.getElementById("frequency-grid");
+const recommendationListEl = document.getElementById("recommendation-list");
+const generateButtonEl = document.getElementById("generate-button");
+const drawHistoryEl = document.getElementById("draw-history");
+const historyCaptionEl = document.getElementById("history-caption");
+const backtestCaptionEl = document.getElementById("backtest-caption");
+const backtestSummaryEl = document.getElementById("backtest-summary");
+const backtestHistoryEl = document.getElementById("backtest-history");
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function ballClass(number) {
+  if (number <= 10) return "yellow";
+  if (number <= 20) return "blue";
+  if (number <= 30) return "red";
+  if (number <= 40) return "gray";
+  return "green";
+}
+
+function ball(number, tone = "") {
+  return `<span class="ball ${ballClass(number)} ${tone}">${number}</span>`;
+}
+
+function summaryCard(label, value, meta) {
+  return `
+    <article class="summary-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(meta)}</small>
+    </article>
+  `;
+}
+
+function formatSyncLabel(sync) {
+  if (!sync?.lastSyncedAt) {
+    return "아직 동기화 기록이 없습니다.";
+  }
+
+  const date = new Date(sync.lastSyncedAt);
+  if (Number.isNaN(date.getTime())) {
+    return "동기화 시간을 확인할 수 없습니다.";
+  }
+
+  return `${date.toLocaleString("ko-KR")} 기준으로 최신 회차를 확인했습니다.`;
+}
+
+function temperatureItem(item, type) {
+  const note =
+    type === "hot"
+      ? `${item.count}회 출현`
+      : `${item.missCount}회차째 미출현`;
+
+  return `
+    <div class="temperature-chip">
+      ${ball(item.number, type)}
+      <span>${escapeHtml(note)}</span>
+    </div>
+  `;
+}
+
+function frequencyCell(item) {
+  return `
+    <div class="frequency-cell">
+      ${ball(item.number)}
+      <strong>${item.count}</strong>
+      <span>${item.missCount}회 비움</span>
+    </div>
+  `;
+}
+
+function recommendationCard(item) {
+  return `
+    <article class="recommendation-card">
+      <div class="recommendation-head">
+        <div>
+          <span class="recommendation-index">SET ${item.id}</span>
+          <h3>${escapeHtml(item.label)}</h3>
+        </div>
+        <div class="recommendation-meta">
+          <span>종합 ${item.score}</span>
+          <span>모델 ${item.modelChance}%</span>
+          <span>합 ${item.sum}</span>
+          <span>홀짝 ${item.odd}:${item.even}</span>
+          <span>AC ${item.profileDetails.acValue}</span>
+        </div>
+      </div>
+      <div class="ball-row large">
+        ${item.numbers.map((number) => ball(number)).join("")}
+      </div>
+      <div class="score-grid">
+        <div class="score-chip">
+          <span>최근성</span>
+          <strong>${item.breakdown.numberScore}</strong>
+        </div>
+        <div class="score-chip">
+          <span>백테스트</span>
+          <strong>${item.breakdown.backtestScore}</strong>
+        </div>
+        <div class="score-chip">
+          <span>조합 패턴</span>
+          <strong>${item.breakdown.patternScore}</strong>
+        </div>
+      </div>
+      <div class="score-grid compact">
+        <div class="score-chip">
+          <span>5등권 추정</span>
+          <strong>${item.historicalFit.hit3Rate}%</strong>
+        </div>
+        <div class="score-chip">
+          <span>저구간 수</span>
+          <strong>${item.profileDetails.lowCount}</strong>
+        </div>
+        <div class="score-chip">
+          <span>끝수 다양성</span>
+          <strong>${item.profileDetails.endDigitVariety}</strong>
+        </div>
+        <div class="score-chip">
+          <span>연번 수</span>
+          <strong>${item.profileDetails.consecutivePairs}</strong>
+        </div>
+      </div>
+      <div class="anchor-list">
+        ${item.anchors
+          .map(
+            (anchor) => `
+              <div class="anchor-chip">
+                ${ball(anchor.number, "hot")}
+                <span>최근 ${anchor.recentScore} / 백테스트 ${anchor.backtestHitRate}%</span>
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function quickPickCard(item) {
+  return `
+    <article class="quick-pick-card">
+      <div class="draw-meta">
+        <div>
+          <strong>SET ${item.id}</strong>
+          <span>${escapeHtml(item.label)}</span>
+        </div>
+        <div class="recommendation-meta">
+          <span>모델 ${item.modelChance}%</span>
+          <span>5등권 ${item.historicalFit.hit3Rate}%</span>
+        </div>
+      </div>
+      <div class="ball-row">
+        ${item.numbers.map((number) => ball(number)).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function rankingCard(item) {
+  return `
+    <article class="ranking-card">
+      <span class="rank-badge">#${item.rank}</span>
+      ${ball(item.number, item.rank <= 5 ? "hot" : "")}
+      <strong>${item.number}</strong>
+      <small>모델 ${item.totalScore}</small>
+      <small>최근 ${item.recentScore}</small>
+    </article>
+  `;
+}
+
+function customRecommendationCard(item) {
+  if (!item) {
+    return `<div class="empty-state">아직 맞춤 조합이 없습니다.</div>`;
+  }
+
+  return `
+    <article class="recommendation-card spotlight">
+      <div class="recommendation-head">
+        <div>
+          <span class="recommendation-index">CUSTOM</span>
+          <h3>${escapeHtml(item.label)}</h3>
+        </div>
+        <div class="recommendation-meta">
+          <span>목표 ${item.targetHit3Rate}%</span>
+          <span>모델 ${item.modelChance}%</span>
+          <span>5등권 ${item.historicalFit.hit3Rate}%</span>
+        </div>
+      </div>
+      <div class="ball-row large">
+        ${item.numbers.map((number) => ball(number)).join("")}
+      </div>
+      <div class="score-grid">
+        <div class="score-chip">
+          <span>평균 적중 수</span>
+          <strong>${item.historicalFit.averageMatches}</strong>
+        </div>
+        <div class="score-chip">
+          <span>고정 번호</span>
+          <strong>${item.fixedNumber || "자동"}</strong>
+        </div>
+        <div class="score-chip">
+          <span>4등권 추정</span>
+          <strong>${item.historicalFit.hit4Rate}%</strong>
+        </div>
+        <div class="score-chip">
+          <span>종합 점수</span>
+          <strong>${item.score}</strong>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function backtestCard(item) {
+  const best = item.matches.reduce((current, candidate) => (candidate.matchCount > current.matchCount ? candidate : current), item.matches[0]);
+  return `
+    <article class="draw-card">
+      <div class="draw-meta">
+        <div>
+          <strong>${item.round}회차 백테스트</strong>
+          <span>${escapeHtml(item.drawDate)} · 최고 ${best.matchCount}개 적중</span>
+        </div>
+      </div>
+      <div class="ball-row">
+        ${item.winningNumbers.map((number) => ball(number)).join("")}
+      </div>
+      <div class="anchor-list">
+        ${item.matches
+          .map(
+            (match) => `
+              <div class="anchor-chip">
+                <strong>SET ${match.setId}</strong>
+                <span>${match.matchCount}개 · ${match.tier}</span>
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function drawCard(draw) {
+  return `
+    <article class="draw-card">
+      <div class="draw-meta">
+        <div>
+          <strong>${draw.round}회차</strong>
+          <span>${escapeHtml(draw.drawDate)}</span>
+        </div>
+        <button type="button" class="ghost danger" data-round="${draw.round}">삭제</button>
+      </div>
+      <div class="ball-row">
+        ${draw.numbers.map((number) => ball(number)).join("")}
+        ${draw.bonus ? `<span class="bonus-divider">+</span>${ball(draw.bonus, "bonus")}` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderSummary() {
+  if (!state.analysis) {
+    return;
+  }
+
+  const analysis = state.analysis;
+  summaryCardsEl.innerHTML = [
+    summaryCard("저장 회차", `${analysis.drawCount}개`, "누적 분석 기준"),
+    summaryCard("최신 회차", analysis.latestRound ? `${analysis.latestRound}회` : "-", analysis.latestDrawDate || "날짜 없음"),
+    summaryCard("평균 출현률", `${analysis.averageHitRate}회`, "번호당 평균"),
+    summaryCard("추천 세트", `${state.recommendations.length}개`, "즉시 생성 완료")
+  ].join("");
+
+  analysisCaptionEl.textContent = analysis.latestRound
+    ? `${analysis.latestRound}회차까지 반영된 데이터입니다.`
+    : "아직 분석할 회차가 없습니다.";
+
+  avgSumEl.textContent = analysis.patternSummary.averageSum || "-";
+  avgOddEl.textContent = analysis.patternSummary.averageOddCount || "-";
+  avgAcEl.textContent = analysis.patternSummary.averageAc || "-";
+  avgLowEl.textContent = analysis.patternSummary.averageLowCount || "-";
+}
+
+function renderSections() {
+  if (!state.analysis) {
+    return;
+  }
+
+  const counts = state.analysis.patternSummary.sectionCounts || [];
+  const max = Math.max(...counts, 1);
+  const labels = ["1-10", "11-20", "21-30", "31-40", "41-45"];
+
+  sectionBarsEl.innerHTML = counts
+    .map((count, index) => {
+      const width = `${Math.max(10, Math.round((count / max) * 100))}%`;
+      return `
+        <div class="section-row">
+          <span>${labels[index]}</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${width}"></div></div>
+          <strong>${count}</strong>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderInsights() {
+  if (!state.analysis) {
+    return;
+  }
+
+  const topPairs = state.analysis.patternSummary.topPairs || [];
+  const carryOverNumbers = state.analysis.patternSummary.carryOverNumbers || [];
+
+  topPairsEl.innerHTML = topPairs.length
+    ? topPairs
+        .map(
+          (item) => `
+            <div class="pair-chip">
+              <div class="ball-row">
+                ${item.pair.map((number) => ball(number)).join("")}
+              </div>
+              <span>${item.count}회 동반 출현</span>
+            </div>
+          `
+        )
+        .join("")
+    : `<div class="empty-inline">아직 페어 분석 데이터가 부족합니다.</div>`;
+
+  carryOverEl.innerHTML = carryOverNumbers.length
+    ? carryOverNumbers.map((number) => ball(number, "hot")).join("")
+    : `<div class="empty-inline">직전 회차와 겹친 번호가 없습니다.</div>`;
+
+  const endDigitCounts = state.analysis.patternSummary.endDigitCounts || [];
+  const maxDigitCount = Math.max(...endDigitCounts, 1);
+  endDigitBarsEl.innerHTML = endDigitCounts
+    .map(
+      (count, digit) => `
+        <div class="mini-row">
+          <span>${digit}</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.max(10, Math.round((count / maxDigitCount) * 100))}%"></div></div>
+          <strong>${count}</strong>
+        </div>
+      `
+    )
+    .join("");
+
+  consecutiveSummaryEl.textContent = `최근 10회 중 ${state.analysis.patternSummary.consecutiveDrawCount}회에서 연번이 등장했습니다.`;
+}
+
+function renderTemperature() {
+  if (!state.analysis) {
+    return;
+  }
+
+  hotNumbersEl.innerHTML = state.analysis.hotNumbers.map((item) => temperatureItem(item, "hot")).join("");
+  coldNumbersEl.innerHTML = state.analysis.coldNumbers.map((item) => temperatureItem(item, "cold")).join("");
+}
+
+function renderFrequencyGrid() {
+  if (!state.analysis) {
+    return;
+  }
+
+  frequencyGridEl.innerHTML = state.analysis.numberStats.map(frequencyCell).join("");
+}
+
+function renderRecommendations() {
+  recommendationListEl.innerHTML = state.recommendations.map(recommendationCard).join("");
+}
+
+function renderQuickPicks() {
+  quickPicksEl.innerHTML = state.recommendations.map(quickPickCard).join("");
+}
+
+function renderNumberRanking() {
+  numberRankingEl.innerHTML = state.nextNumberRanking.slice(0, 18).map(rankingCard).join("");
+}
+
+function renderCustomRecommendation() {
+  customRecommendationEl.innerHTML = customRecommendationCard(state.customRecommendation);
+}
+
+function applyTargetRange() {
+  if (!state.targetRange) {
+    return;
+  }
+
+  const { min, max, step, averageHit3Rate, defaultHit3Rate } = state.targetRange;
+  targetHit3RangeEl.min = String(min);
+  targetHit3RangeEl.max = String(max);
+  targetHit3RangeEl.step = String(step);
+  targetHit3InputEl.min = String(min);
+  targetHit3InputEl.max = String(max);
+  targetHit3InputEl.step = String(step);
+
+  if (!targetHit3RangeEl.value) {
+    targetHit3RangeEl.value = String(defaultHit3Rate);
+  }
+  if (!targetHit3InputEl.value) {
+    targetHit3InputEl.value = String(defaultHit3Rate);
+  }
+
+  targetCaptionEl.textContent = `허용 범위 ${min}% ~ ${max}% · 현재 추천 평균 5등권 추정치는 ${averageHit3Rate}% 입니다.`;
+}
+
+function populateFixedNumberOptions() {
+  if (targetFixedNumberEl.options.length > 1) {
+    return;
+  }
+
+  for (let number = 1; number <= 45; number += 1) {
+    const option = document.createElement("option");
+    option.value = String(number);
+    option.textContent = `${number}번 고정`;
+    targetFixedNumberEl.append(option);
+  }
+}
+
+function clampTargetValue(value) {
+  if (!state.targetRange) {
+    return 3.5;
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return state.targetRange.defaultHit3Rate;
+  }
+
+  return Math.min(state.targetRange.max, Math.max(state.targetRange.min, numeric));
+}
+
+function syncTargetInputs(nextValue) {
+  const clamped = clampTargetValue(nextValue);
+  const normalized = clamped.toFixed(1);
+  targetHit3RangeEl.value = normalized;
+  targetHit3InputEl.value = normalized;
+  const fixedLabel = targetFixedNumberEl.value ? `${targetFixedNumberEl.value}번 고정` : "고정 번호 없음";
+  targetHelpEl.textContent = `현재 목표값 ${normalized}% · ${fixedLabel} 기준으로 맞춤 1조합을 생성합니다.`;
+}
+
+function renderHistory() {
+  const visibleDraws = state.draws.slice(0, 24);
+  historyCaptionEl.textContent = `전체 ${state.draws.length}개 중 최근 ${visibleDraws.length}개 회차만 표시합니다.`;
+  drawHistoryEl.innerHTML = visibleDraws.length
+    ? visibleDraws.map(drawCard).join("")
+    : `<div class="empty-state">아직 저장된 회차가 없습니다.</div>`;
+}
+
+function renderBacktest() {
+  if (!state.backtest) {
+    return;
+  }
+
+  const summary = state.backtest.summary;
+  backtestCaptionEl.textContent = `${summary.testedRounds}개 회차를 기준으로, 각 시점의 과거 데이터만 사용해 5세트를 생성한 결과입니다.`;
+  backtestSummaryEl.innerHTML = [
+    summaryCard("3개 이상", `${summary.hit3Plus}회`, "5등권 이상 경험"),
+    summaryCard("4개 이상", `${summary.hit4Plus}회`, "4등권 이상"),
+    summaryCard("5개 이상", `${summary.hit5Plus}회`, "3등권 이상"),
+    summaryCard("평균 최고 적중", `${summary.averageBestMatch}개`, "회차당 최고치 평균")
+  ].join("");
+
+  backtestHistoryEl.innerHTML = state.backtest.history.map(backtestCard).join("");
+}
+
+function syncApp(payload) {
+  state.draws = payload.draws || [];
+  state.analysis = payload.analysis || null;
+  state.recommendations = payload.recommendations || [];
+  state.nextNumberRanking = payload.nextNumberRanking || [];
+  state.customRecommendation = payload.customRecommendation || null;
+  state.targetRange = payload.targetRange || null;
+  syncCaptionEl.textContent = formatSyncLabel(payload.sync);
+
+  populateFixedNumberOptions();
+  applyTargetRange();
+  renderSummary();
+  renderCustomRecommendation();
+  renderQuickPicks();
+  renderNumberRanking();
+  renderSections();
+  renderInsights();
+  renderTemperature();
+  renderFrequencyGrid();
+  renderRecommendations();
+  renderHistory();
+}
+
+async function sendJson(url, options = {}) {
+  const response = await fetch(url, {
+    headers: { "Content-Type": "application/json" },
+    ...options
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload.error || "요청에 실패했습니다.");
+  }
+
+  return payload;
+}
+
+async function fetchApp() {
+  const payload = await sendJson("/api/lotto");
+  syncApp(payload);
+}
+
+async function fetchBacktest() {
+  backtestCaptionEl.textContent = "백테스트를 계산하는 중입니다...";
+  const payload = await sendJson("/api/lotto/backtest");
+  state.backtest = payload.backtest || null;
+  renderBacktest();
+}
+
+async function onTargetGenerateClick() {
+  targetGenerateButtonEl.disabled = true;
+
+  try {
+    const payload = await sendJson("/api/lotto/custom-recommendation", {
+      method: "POST",
+      body: JSON.stringify({
+        targetHit3Rate: clampTargetValue(targetHit3InputEl.value),
+        fixedNumber: targetFixedNumberEl.value ? Number(targetFixedNumberEl.value) : null
+      })
+    });
+    state.customRecommendation = payload.customRecommendation || null;
+    renderCustomRecommendation();
+    const fixedLabel = targetFixedNumberEl.value ? ` · ${targetFixedNumberEl.value}번 포함` : "";
+    targetHelpEl.textContent = `목표 ${targetHit3InputEl.value}%${fixedLabel} 기준 맞춤 조합을 생성했습니다.`;
+  } catch (error) {
+    targetHelpEl.textContent = error.message;
+  } finally {
+    targetGenerateButtonEl.disabled = false;
+  }
+}
+
+async function onGenerateClick() {
+  generateButtonEl.disabled = true;
+
+  try {
+    const payload = await sendJson("/api/lotto/recommendations", {
+      method: "POST"
+    });
+    state.recommendations = payload.recommendations || [];
+    state.targetRange = payload.targetRange || state.targetRange;
+    state.customRecommendation = payload.customRecommendation || state.customRecommendation;
+    applyTargetRange();
+    renderSummary();
+    renderCustomRecommendation();
+    renderQuickPicks();
+    renderRecommendations();
+  } catch (error) {
+    statusMessageEl.textContent = error.message;
+  } finally {
+    generateButtonEl.disabled = false;
+  }
+}
+
+async function onSyncClick() {
+  syncButtonEl.disabled = true;
+  syncCaptionEl.textContent = "최신 회차를 다시 확인하는 중입니다...";
+
+  try {
+    const payload = await sendJson("/api/lotto/sync", {
+      method: "POST"
+    });
+    syncApp(payload);
+    statusMessageEl.textContent = "최신 회차 동기화를 완료했습니다.";
+  } catch (error) {
+    syncCaptionEl.textContent = error.message;
+  } finally {
+    syncButtonEl.disabled = false;
+  }
+}
+
+async function onHistoryClick(event) {
+  const button = event.target.closest("button[data-round]");
+  if (!button) {
+    return;
+  }
+
+  try {
+    const payload = await sendJson(`/api/lotto/draws/${button.dataset.round}`, {
+      method: "DELETE"
+    });
+    syncApp(payload);
+    statusMessageEl.textContent = "회차를 삭제했습니다.";
+  } catch (error) {
+    statusMessageEl.textContent = error.message;
+  }
+}
+
+generateButtonEl.addEventListener("click", onGenerateClick);
+targetGenerateButtonEl.addEventListener("click", onTargetGenerateClick);
+syncButtonEl.addEventListener("click", onSyncClick);
+drawHistoryEl.addEventListener("click", onHistoryClick);
+targetHit3RangeEl.addEventListener("input", (event) => {
+  syncTargetInputs(event.target.value);
+});
+targetHit3InputEl.addEventListener("input", (event) => {
+  syncTargetInputs(event.target.value);
+});
+targetFixedNumberEl.addEventListener("change", () => {
+  syncTargetInputs(targetHit3InputEl.value);
+});
+
+fetchApp().catch((error) => {
+  analysisCaptionEl.textContent = error.message;
+  syncCaptionEl.textContent = error.message;
+  drawHistoryEl.innerHTML = `<div class="empty-state">데이터를 불러오지 못했습니다.</div>`;
+});
+
+fetchBacktest().catch((error) => {
+  backtestCaptionEl.textContent = error.message;
+  backtestHistoryEl.innerHTML = `<div class="empty-state">백테스트를 불러오지 못했습니다.</div>`;
+});

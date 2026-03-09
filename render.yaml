@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: lotto-analysis-generator
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/lotto
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22.14.0

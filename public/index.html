@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>로또 번호 분석 생성기</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Lotto Insight Studio</p>
+          <h1>로또 번호 분석 생성기</h1>
+          <p class="lede">
+            최신 회차 흐름을 반영해 번호 순위, 추천 5조합, 맞춤 1조합을 빠르게 확인합니다.
+          </p>
+          <div class="hero-badges">
+            <span>자동 동기화</span>
+            <span>백테스트 기반</span>
+            <span>맞춤 1조합 생성</span>
+          </div>
+          <div class="hero-actions">
+            <a
+              class="hero-link"
+              href="https://ol.dhlottery.co.kr/olotto/game_mobile/game645.do"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              동행복권 웹구매 바로가기
+            </a>
+          </div>
+        </div>
+        <aside class="hero-note">
+          <strong>빠른 안내</strong>
+          <p>
+            당첨 보장 도구는 아니고, 실제 회차 패턴과 최근성 점수를 참고해 조합을 압축해서 보여주는 분석 화면입니다.
+          </p>
+        </aside>
+      </section>
+
+      <section class="panel sync-panel">
+        <div class="panel-head">
+          <div>
+            <h2>자동 데이터 동기화</h2>
+            <p id="sync-caption">최신 회차 확인 중입니다.</p>
+          </div>
+          <button id="sync-button" type="button">최신 회차 다시 가져오기</button>
+        </div>
+        <p id="status-message" class="status-message"></p>
+      </section>
+
+      <section class="panel target-panel">
+        <div class="panel-head">
+          <div>
+            <h2>맞춤 1조합 생성</h2>
+            <p id="target-caption">목표 5등권 확률 범위 안에서 맞춤 조합을 만듭니다.</p>
+          </div>
+          <button id="target-generate-button" type="button">맞춤 1조합 만들기</button>
+        </div>
+        <div class="target-controls">
+          <label class="target-range-label">
+            <span>5등권 목표 확률</span>
+            <input id="target-hit3-range" type="range" min="1" max="7" step="0.1" value="3.5" />
+          </label>
+          <label class="target-input-label">
+            <span>직접 입력 (%)</span>
+            <input id="target-hit3-input" type="number" min="1" max="7" step="0.1" value="3.5" />
+          </label>
+          <label class="target-input-label">
+            <span>고정 번호 1개</span>
+            <select id="target-fixed-number">
+              <option value="">자동 선택</option>
+            </select>
+          </label>
+        </div>
+        <p id="target-help" class="target-help">허용 범위 안에서만 설정할 수 있습니다.</p>
+        <div id="custom-recommendation" class="custom-recommendation"></div>
+      </section>
+
+      <section class="panel quick-picks-panel">
+        <div class="panel-head">
+          <h2>빠른 추천 5조합</h2>
+          <p>설명 없이 바로 보고 싶은 경우를 위한 상단 요약입니다.</p>
+        </div>
+        <div id="quick-picks" class="quick-picks"></div>
+      </section>
+
+      <section class="panel ranking-panel">
+        <div class="panel-head">
+          <h2>이번 회차 가능성 번호 순위</h2>
+          <p>최근성, 백테스트, 출현 흐름을 합친 모델 순위입니다.</p>
+        </div>
+        <div id="number-ranking" class="number-ranking"></div>
+      </section>
+
+      <section class="top-grid">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>분석 요약</h2>
+            <p id="analysis-caption">회차 데이터를 읽는 중입니다.</p>
+          </div>
+          <div id="summary-cards" class="summary-grid"></div>
+          <div class="trend-grid">
+            <div class="trend-card">
+              <span>최근 10회 평균 합계</span>
+              <strong id="avg-sum">-</strong>
+            </div>
+            <div class="trend-card">
+              <span>최근 10회 평균 홀수 수</span>
+              <strong id="avg-odd">-</strong>
+            </div>
+            <div class="trend-card">
+              <span>최근 10회 평균 AC값</span>
+              <strong id="avg-ac">-</strong>
+            </div>
+            <div class="trend-card">
+              <span>최근 10회 평균 저구간 수</span>
+              <strong id="avg-low">-</strong>
+            </div>
+          </div>
+          <div class="range-panel">
+            <div class="range-head">
+              <h3>구간 분포</h3>
+              <span>최근 10회 기준</span>
+            </div>
+            <div id="section-bars" class="section-bars"></div>
+          </div>
+          <div class="insight-grid">
+            <div class="insight-card">
+              <h3>자주 함께 나온 페어</h3>
+              <div id="top-pairs" class="insight-list"></div>
+            </div>
+            <div class="insight-card">
+              <h3>직전 회차 이월 번호</h3>
+              <div id="carry-over" class="ball-row"></div>
+            </div>
+            <div class="insight-card">
+              <h3>끝수 분포</h3>
+              <div id="end-digit-bars" class="mini-bars"></div>
+            </div>
+            <div class="insight-card">
+              <h3>연번 등장 회차</h3>
+              <div id="consecutive-summary" class="insight-stat">-</div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>번호 온도</h2>
+            <p>자주 나온 번호와 한동안 쉬고 있던 번호를 함께 확인합니다.</p>
+          </div>
+          <div class="temperature-block">
+            <div>
+              <h3>핫 넘버</h3>
+              <div id="hot-numbers" class="ball-row"></div>
+            </div>
+            <div>
+              <h3>콜드 넘버</h3>
+              <div id="cold-numbers" class="ball-row"></div>
+            </div>
+          </div>
+          <div class="panel-head compact">
+            <h3>번호별 출현 횟수</h3>
+            <p>1부터 45까지 전체 빈도를 한눈에 봅니다.</p>
+          </div>
+          <div id="frequency-grid" class="frequency-grid"></div>
+        </article>
+      </section>
+
+      <section class="dashboard">
+        <article class="panel generator-panel">
+          <div class="panel-head">
+            <h2>추천 조합 생성</h2>
+            <p>공식 회차 데이터를 바탕으로 다른 성격의 조합 5개를 고정 생성합니다.</p>
+          </div>
+          <div class="generator-toolbar">
+            <p class="generator-note">항상 5세트 생성</p>
+            <button id="generate-button" type="button">새 조합 생성</button>
+          </div>
+          <div id="recommendation-list" class="recommendation-list"></div>
+        </article>
+      </section>
+
+      <section class="panel history-panel">
+        <div class="panel-head">
+          <h2>백테스트</h2>
+          <p id="backtest-caption">최근 구간을 기준으로 추천 로직을 역검증합니다.</p>
+        </div>
+        <div id="backtest-summary" class="summary-grid"></div>
+        <div id="backtest-history" class="backtest-history"></div>
+      </section>
+
+      <section class="panel history-panel">
+        <div class="panel-head">
+          <h2>저장된 회차</h2>
+          <p id="history-caption">불러오는 중입니다.</p>
+        </div>
+        <div id="draw-history" class="draw-history"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
