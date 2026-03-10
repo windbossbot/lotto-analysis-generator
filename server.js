@@ -23,8 +23,10 @@ const TARGET_HIT3_RATE_MIN = 1;
 const TARGET_HIT3_RATE_MAX = 7;
 const TARGET_HIT3_RATE_STEP = 0.1;
 const snapshotCache = {
-  key: null,
-  value: null
+  coreKey: null,
+  coreValue: null,
+  backtestKey: null,
+  backtestValue: null
 };
 
 const defaultDraws = [
@@ -243,8 +245,10 @@ async function syncLatestDraws(force = false) {
 
   const merged = [...byRound.values()].sort((a, b) => a.round - b.round);
   writeDraws(merged);
-  snapshotCache.key = null;
-  snapshotCache.value = null;
+  snapshotCache.coreKey = null;
+  snapshotCache.coreValue = null;
+  snapshotCache.backtestKey = null;
+  snapshotCache.backtestValue = null;
 
   writeSyncState({
     lastSyncedAt: new Date().toISOString(),
@@ -1080,28 +1084,41 @@ function runBacktest(draws, rounds = 26) {
   };
 }
 
-function buildSnapshot(draws) {
+function buildCoreSnapshot(draws) {
   const sortedDraws = [...draws].sort((a, b) => b.round - a.round);
   const cacheKey = `${sortedDraws[0]?.round || 0}:${sortedDraws.length}`;
 
-  if (snapshotCache.key === cacheKey && snapshotCache.value) {
-    return snapshotCache.value;
+  if (snapshotCache.coreKey === cacheKey && snapshotCache.coreValue) {
+    return snapshotCache.coreValue;
   }
 
   const value = {
     analysis: buildAnalysis(sortedDraws),
-    backtest: runBacktest(sortedDraws, 26),
     nextNumberRanking: buildNextNumberRanking(sortedDraws)
   };
 
-  snapshotCache.key = cacheKey;
-  snapshotCache.value = value;
+  snapshotCache.coreKey = cacheKey;
+  snapshotCache.coreValue = value;
+  return value;
+}
+
+function buildBacktestSnapshot(draws) {
+  const sortedDraws = [...draws].sort((a, b) => b.round - a.round);
+  const cacheKey = `${sortedDraws[0]?.round || 0}:${sortedDraws.length}`;
+
+  if (snapshotCache.backtestKey === cacheKey && snapshotCache.backtestValue) {
+    return snapshotCache.backtestValue;
+  }
+
+  const value = runBacktest(sortedDraws, 26);
+  snapshotCache.backtestKey = cacheKey;
+  snapshotCache.backtestValue = value;
   return value;
 }
 
 function sendAppState(res) {
   const draws = readDraws().sort((a, b) => b.round - a.round);
-  const snapshot = buildSnapshot(draws);
+  const snapshot = buildCoreSnapshot(draws);
   const recommendations = buildRecommendations(draws, RECOMMENDATION_COUNT);
   const targetRange = buildTargetRange(recommendations);
   const customRecommendation = buildCustomRecommendation(draws, targetRange.defaultHit3Rate);
@@ -1147,7 +1164,7 @@ app.get("/health", (_req, res) => {
 app.get("/api/lotto", async (_req, res) => {
   try {
     const draws = await getAvailableDraws(false);
-    const snapshot = buildSnapshot(draws);
+    const snapshot = buildCoreSnapshot(draws);
     const recommendations = buildRecommendations(draws, RECOMMENDATION_COUNT);
     const targetRange = buildTargetRange(recommendations);
     const customRecommendation = buildCustomRecommendation(draws, targetRange.defaultHit3Rate);
@@ -1187,8 +1204,10 @@ app.post("/api/lotto/draws", (req, res) => {
 
   draws.push(result.value);
   writeDraws(draws.sort((a, b) => a.round - b.round));
-  snapshotCache.key = null;
-  snapshotCache.value = null;
+  snapshotCache.coreKey = null;
+  snapshotCache.coreValue = null;
+  snapshotCache.backtestKey = null;
+  snapshotCache.backtestValue = null;
   sendAppState(res);
 });
 
@@ -1203,8 +1222,10 @@ app.delete("/api/lotto/draws/:round", (req, res) => {
   }
 
   writeDraws(nextDraws.sort((a, b) => a.round - b.round));
-  snapshotCache.key = null;
-  snapshotCache.value = null;
+  snapshotCache.coreKey = null;
+  snapshotCache.coreValue = null;
+  snapshotCache.backtestKey = null;
+  snapshotCache.backtestValue = null;
   sendAppState(res);
 });
 
@@ -1247,7 +1268,7 @@ app.get("/api/lotto/backtest", async (_req, res) => {
   try {
     const draws = await getAvailableDraws(false);
     res.json({
-      backtest: buildSnapshot(draws).backtest
+      backtest: buildBacktestSnapshot(draws)
     });
   } catch (error) {
     res.status(500).json({ error: error.message || "백테스트를 수행하지 못했습니다." });

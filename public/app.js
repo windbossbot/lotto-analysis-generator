@@ -547,7 +547,7 @@ async function sendJson(url, options = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(payload.error || "요청에 실패했습니다.");
+    throw new Error(payload.error || `요청에 실패했습니다. (${response.status})`);
   }
 
   return payload;
