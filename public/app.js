@@ -5,7 +5,9 @@ const state = {
   backtest: null,
   nextNumberRanking: [],
   customRecommendation: null,
-  targetRange: null
+  targetRange: null,
+  calcStatus: null,
+  latestMeta: null
 };
 
 const summaryCardsEl = document.getElementById("summary-cards");
@@ -27,6 +29,9 @@ const targetHit3InputEl = document.getElementById("target-hit3-input");
 const targetFixedNumberEl = document.getElementById("target-fixed-number");
 const syncButtonEl = document.getElementById("sync-button");
 const refreshButtonEl = document.getElementById("refresh-button");
+const finishButtonEl = document.getElementById("finish-button");
+const latestRoundLabelEl = document.getElementById("latest-round-label");
+const latestDateLabelEl = document.getElementById("latest-date-label");
 const avgSumEl = document.getElementById("avg-sum");
 const avgOddEl = document.getElementById("avg-odd");
 const avgAcEl = document.getElementById("avg-ac");
@@ -97,6 +102,19 @@ function formatSyncLabel(sync) {
   }
 
   return `${date.toLocaleString("ko-KR")} 기준으로 최신 회차를 확인했습니다.`;
+}
+
+function renderSyncFacts() {
+  latestRoundLabelEl.textContent = state.latestMeta?.latestRound ? `${state.latestMeta.latestRound}회` : "-";
+  latestDateLabelEl.textContent = state.latestMeta?.latestDrawDate || "-";
+}
+
+function updateCalcButtons() {
+  const status = state.calcStatus || {};
+  refreshButtonEl.disabled = false;
+  finishButtonEl.disabled = false;
+  refreshButtonEl.textContent = status.coreNeedsRefresh ? "계산하기" : "기본 계산 다시하기";
+  finishButtonEl.textContent = status.backtestNeedsRefresh ? "남은 계산 마무리" : "백테스트 다시 계산";
 }
 
 function temperatureItem(item, type) {
@@ -525,9 +543,14 @@ function syncApp(payload) {
   state.nextNumberRanking = payload.nextNumberRanking || [];
   state.customRecommendation = payload.customRecommendation || null;
   state.targetRange = payload.targetRange || null;
+  state.calcStatus = payload.calcStatus || null;
+  state.latestMeta = payload.latestMeta || null;
+  state.backtest = payload.backtest || state.backtest;
   syncCaptionEl.textContent = formatSyncLabel(payload.sync);
 
   populateFixedNumberOptions();
+  renderSyncFacts();
+  updateCalcButtons();
   applyTargetRange();
   renderSummary();
   renderCustomRecommendation();
@@ -643,12 +666,20 @@ async function fetchApp() {
 }
 
 async function fetchBacktest() {
-  backtestCaptionEl.textContent = "백테스트를 계산하는 중입니다...";
-  setLoadingState("백테스트 계산 중", "과거 회차 기준 검증 데이터를 만드는 중입니다.", 74, "active");
+  backtestCaptionEl.textContent = "저장된 백테스트를 확인하는 중입니다...";
   const payload = await sendJsonWithRetry("/api/lotto/backtest", {}, { retries: 2, delayMs: 2000 });
   state.backtest = payload.backtest || null;
+  state.calcStatus = payload.calcStatus || state.calcStatus;
+  updateCalcButtons();
   renderBacktest();
-  setLoadingState("로딩 완료", "모든 분석 데이터가 준비되었습니다.", 100, "done");
+
+  if (state.backtest) {
+    setLoadingState("로딩 완료", "저장된 분석과 백테스트까지 준비되었습니다.", 100, "done");
+  } else {
+    backtestCaptionEl.textContent = "백테스트가 아직 계산되지 않았습니다. 상단의 '남은 계산 마무리'를 눌러주세요.";
+    backtestHistoryEl.innerHTML = `<div class="empty-state">백테스트는 필요할 때만 계산하도록 바뀌었습니다.</div>`;
+    setLoadingState("기본 분석 완료", "기본 화면은 준비됐습니다. 필요하면 남은 계산을 마무리하세요.", 68, "done");
+  }
 }
 
 async function onTargetGenerateClick() {
@@ -683,6 +714,8 @@ async function onGenerateClick() {
     state.recommendations = payload.recommendations || [];
     state.targetRange = payload.targetRange || state.targetRange;
     state.customRecommendation = payload.customRecommendation || state.customRecommendation;
+    state.calcStatus = payload.calcStatus || state.calcStatus;
+    updateCalcButtons();
     applyTargetRange();
     renderSummary();
     renderCustomRecommendation();
@@ -697,16 +730,53 @@ async function onGenerateClick() {
 
 async function onRefreshClick() {
   refreshButtonEl.disabled = true;
-  statusMessageEl.textContent = "현재 저장된 회차 기준으로 분석을 다시 계산하는 중입니다.";
+  setLoadingState("기본 계산 중", "저장된 회차 기준으로 추천과 분석을 다시 계산합니다.", 42, "active");
+  statusMessageEl.textContent = "현재 저장된 회차 기준으로 기본 분석을 다시 계산하는 중입니다.";
 
   try {
-    await fetchApp();
-    await fetchBacktest();
-    statusMessageEl.textContent = "분석과 추천 계산을 다시 완료했습니다.";
+    const payload = await sendJson("/api/lotto/recommendations", {
+      method: "POST"
+    });
+    state.recommendations = payload.recommendations || [];
+    state.targetRange = payload.targetRange || state.targetRange;
+    state.customRecommendation = payload.customRecommendation || state.customRecommendation;
+    state.calcStatus = payload.calcStatus || state.calcStatus;
+    updateCalcButtons();
+    applyTargetRange();
+    renderSummary();
+    renderCustomRecommendation();
+    renderQuickPicks();
+    renderRecommendations();
+    setLoadingState("기본 계산 완료", "추천 조합과 핵심 분석을 다시 계산했습니다.", 72, "done");
+    statusMessageEl.textContent = "기본 분석과 추천 계산을 다시 완료했습니다.";
   } catch (error) {
+    setLoadingState("기본 계산 실패", error.message, 100, "error");
     statusMessageEl.textContent = error.message;
   } finally {
     refreshButtonEl.disabled = false;
+  }
+}
+
+async function onFinishClick() {
+  finishButtonEl.disabled = true;
+  setLoadingState("남은 계산 마무리 중", "백테스트와 남은 검증 계산을 진행합니다.", 78, "active");
+  statusMessageEl.textContent = "남은 계산을 마무리하는 중입니다.";
+
+  try {
+    const payload = await sendJson("/api/lotto/backtest", {
+      method: "POST"
+    });
+    state.backtest = payload.backtest || null;
+    state.calcStatus = payload.calcStatus || state.calcStatus;
+    updateCalcButtons();
+    renderBacktest();
+    setLoadingState("모든 계산 완료", "백테스트까지 포함한 계산이 모두 끝났습니다.", 100, "done");
+    statusMessageEl.textContent = "남은 계산까지 모두 완료했습니다.";
+  } catch (error) {
+    setLoadingState("남은 계산 실패", error.message, 100, "error");
+    statusMessageEl.textContent = error.message;
+  } finally {
+    finishButtonEl.disabled = false;
   }
 }
 
@@ -719,8 +789,12 @@ async function onSyncClick() {
     const payload = await sendJson("/api/lotto/sync", {
       method: "POST"
     });
-    syncApp(payload);
-    setLoadingState("기본 분석 완료", "최신 회차를 반영했습니다. 필요하면 분석 다시 계산을 눌러도 됩니다.", 62, "done");
+    state.calcStatus = payload.calcStatus || state.calcStatus;
+    state.latestMeta = payload.latestMeta || state.latestMeta;
+    renderSyncFacts();
+    updateCalcButtons();
+    syncCaptionEl.textContent = formatSyncLabel(payload.sync);
+    setLoadingState("최신 회차 반영 완료", "새 회차 확인이 끝났습니다. 이제 계산하기를 눌러 분석을 갱신하세요.", 48, "done");
     statusMessageEl.textContent = "최신 회차 동기화를 완료했습니다.";
   } catch (error) {
     setLoadingState("동기화 실패", error.message, 100, "error");
@@ -751,6 +825,7 @@ generateButtonEl.addEventListener("click", onGenerateClick);
 targetGenerateButtonEl.addEventListener("click", onTargetGenerateClick);
 syncButtonEl.addEventListener("click", onSyncClick);
 refreshButtonEl.addEventListener("click", onRefreshClick);
+finishButtonEl.addEventListener("click", onFinishClick);
 drawHistoryEl.addEventListener("click", onHistoryClick);
 targetHit3RangeEl.addEventListener("input", (event) => {
   syncTargetInputs(event.target.value);
@@ -770,7 +845,7 @@ fetchApp().catch((error) => {
 });
 
 fetchBacktest().catch((error) => {
-  setLoadingState("부분 로딩 완료", "기본 화면은 준비됐지만 백테스트는 불러오지 못했습니다.", 100, "done");
+  setLoadingState("부분 로딩 완료", "기본 화면은 준비됐지만 백테스트는 불러오지 못했습니다.", 88, "done");
   backtestCaptionEl.textContent = error.message;
   backtestHistoryEl.innerHTML = `<div class="empty-state">백테스트를 불러오지 못했습니다.</div>`;
 });

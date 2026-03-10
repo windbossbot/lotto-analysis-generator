@@ -8,6 +8,7 @@ const port = process.env.PORT || 3210;
 const dataDir = path.join(__dirname, "data");
 const drawsFile = path.join(dataDir, "lotto-draws.json");
 const syncStateFile = path.join(dataDir, "lotto-sync-state.json");
+const appCacheFile = path.join(dataDir, "lotto-app-cache.json");
 const LOTTO_MIN = 1;
 const LOTTO_MAX = 45;
 const PICKS_PER_DRAW = 6;
@@ -22,8 +23,10 @@ const BACKTEST_CANDIDATE_POOL_SIZE = 40;
 const TARGET_HIT3_RATE_MIN = 1;
 const TARGET_HIT3_RATE_MAX = 7;
 const TARGET_HIT3_RATE_STEP = 0.1;
+const CORE_RECALC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 let drawsMemoryCache = null;
 let syncInFlight = null;
+let appCacheMemory = null;
 const snapshotCache = {
   coreKey: null,
   coreValue: null,
@@ -55,6 +58,14 @@ function ensureStorage() {
 
   if (!fs.existsSync(syncStateFile)) {
     fs.writeFileSync(syncStateFile, `${JSON.stringify({ lastSyncedAt: null }, null, 2)}\n`, "utf8");
+  }
+
+  if (!fs.existsSync(appCacheFile)) {
+    fs.writeFileSync(
+      appCacheFile,
+      `${JSON.stringify({ core: null, backtest: null }, null, 2)}\n`,
+      "utf8"
+    );
   }
 }
 
@@ -88,6 +99,28 @@ function readSyncState() {
 function writeSyncState(syncState) {
   ensureStorage();
   fs.writeFileSync(syncStateFile, `${JSON.stringify(syncState, null, 2)}\n`, "utf8");
+}
+
+function readAppCache() {
+  ensureStorage();
+  if (appCacheMemory) {
+    return JSON.parse(JSON.stringify(appCacheMemory));
+  }
+
+  const raw = fs.readFileSync(appCacheFile, "utf8");
+  try {
+    appCacheMemory = JSON.parse(raw);
+  } catch {
+    appCacheMemory = { core: null, backtest: null };
+  }
+
+  return JSON.parse(JSON.stringify(appCacheMemory));
+}
+
+function writeAppCache(cache) {
+  ensureStorage();
+  appCacheMemory = JSON.parse(JSON.stringify(cache));
+  fs.writeFileSync(appCacheFile, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
 }
 
 function sortNumbers(numbers) {
@@ -271,6 +304,9 @@ async function performSyncLatestDraws(force = false) {
 
   const merged = [...byRound.values()].sort((a, b) => a.round - b.round);
   writeDraws(merged);
+  if (fetchedCount > 0) {
+    invalidateCalculationCache();
+  }
   snapshotCache.coreKey = null;
   snapshotCache.coreValue = null;
   snapshotCache.backtestKey = null;
@@ -1154,22 +1190,117 @@ function buildBacktestSnapshot(draws) {
   return value;
 }
 
-function sendAppState(res) {
-  const draws = readDraws().sort((a, b) => b.round - a.round);
+function buildCorePayload(draws) {
   const snapshot = buildCoreSnapshot(draws);
   const recommendations = buildRecommendations(draws, RECOMMENDATION_COUNT);
   const targetRange = buildTargetRange(recommendations);
   const customRecommendation = buildCustomRecommendation(draws, targetRange.defaultHit3Rate);
-  const syncState = readSyncState();
 
-  res.json({
-    draws,
+  return {
     analysis: snapshot.analysis,
     nextNumberRanking: snapshot.nextNumberRanking,
     recommendations,
     customRecommendation,
-    targetRange,
+    targetRange
+  };
+}
+
+function getLatestDrawMeta(draws) {
+  return {
+    latestRound: draws[0]?.round || null,
+    latestDrawDate: draws[0]?.drawDate || null
+  };
+}
+
+function isCacheFresh(generatedAt) {
+  const date = generatedAt ? new Date(generatedAt) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    return false;
+  }
+
+  return Date.now() - date.getTime() < CORE_RECALC_INTERVAL_MS;
+}
+
+function getCalculationStatus(draws, cache = readAppCache()) {
+  const { latestRound } = getLatestDrawMeta(draws);
+  const core = cache.core;
+  const backtest = cache.backtest;
+
+  return {
+    coreReady: Boolean(core?.payload),
+    coreFresh: Boolean(core?.payload) && core.sourceRound === latestRound && isCacheFresh(core.generatedAt),
+    coreNeedsRefresh: !core?.payload || core.sourceRound !== latestRound || !isCacheFresh(core.generatedAt),
+    coreGeneratedAt: core?.generatedAt || null,
+    backtestReady: Boolean(backtest?.payload),
+    backtestFresh: Boolean(backtest?.payload) && backtest.sourceRound === latestRound && isCacheFresh(backtest.generatedAt),
+    backtestNeedsRefresh: !backtest?.payload || backtest.sourceRound !== latestRound || !isCacheFresh(backtest.generatedAt),
+    backtestGeneratedAt: backtest?.generatedAt || null
+  };
+}
+
+function getCorePayloadFromCache(draws) {
+  const cache = readAppCache();
+  const status = getCalculationStatus(draws, cache);
+
+  if (status.coreFresh && cache.core?.payload) {
+    return cache.core.payload;
+  }
+
+  return null;
+}
+
+function storeCorePayload(draws, payload) {
+  const cache = readAppCache();
+  const { latestRound } = getLatestDrawMeta(draws);
+  cache.core = {
+    sourceRound: latestRound,
+    generatedAt: new Date().toISOString(),
+    payload
+  };
+  writeAppCache(cache);
+}
+
+function storeBacktestPayload(draws, payload) {
+  const cache = readAppCache();
+  const { latestRound } = getLatestDrawMeta(draws);
+  cache.backtest = {
+    sourceRound: latestRound,
+    generatedAt: new Date().toISOString(),
+    payload
+  };
+  writeAppCache(cache);
+}
+
+function invalidateCalculationCache() {
+  const cache = readAppCache();
+  cache.core = null;
+  cache.backtest = null;
+  writeAppCache(cache);
+}
+
+function sendAppState(res) {
+  const draws = readDraws().sort((a, b) => b.round - a.round);
+  const cachedCore = getCorePayloadFromCache(draws);
+  const corePayload = cachedCore || buildCorePayload(draws);
+  if (!cachedCore) {
+    storeCorePayload(draws, corePayload);
+  }
+  const syncState = readSyncState();
+  const calcStatus = getCalculationStatus(draws);
+  const latestMeta = getLatestDrawMeta(draws);
+  const appCache = readAppCache();
+
+  res.json({
+    draws,
+    analysis: corePayload.analysis,
+    nextNumberRanking: corePayload.nextNumberRanking,
+    recommendations: corePayload.recommendations,
+    customRecommendation: corePayload.customRecommendation,
+    targetRange: corePayload.targetRange,
+    backtest: appCache.backtest?.payload || null,
     sync: syncState,
+    calcStatus,
+    latestMeta,
     limits: {
       min: LOTTO_MIN,
       max: LOTTO_MAX,
@@ -1254,6 +1385,7 @@ app.post("/api/lotto/draws", (req, res) => {
 
   draws.push(result.value);
   writeDraws(draws.sort((a, b) => a.round - b.round));
+  invalidateCalculationCache();
   snapshotCache.coreKey = null;
   snapshotCache.coreValue = null;
   snapshotCache.backtestKey = null;
@@ -1272,6 +1404,7 @@ app.delete("/api/lotto/draws/:round", (req, res) => {
   }
 
   writeDraws(nextDraws.sort((a, b) => a.round - b.round));
+  invalidateCalculationCache();
   snapshotCache.coreKey = null;
   snapshotCache.coreValue = null;
   snapshotCache.backtestKey = null;
@@ -1282,12 +1415,13 @@ app.delete("/api/lotto/draws/:round", (req, res) => {
 app.post("/api/lotto/recommendations", async (_req, res) => {
   try {
     const draws = await getAvailableDraws(false);
-    const recommendations = buildRecommendations(draws, RECOMMENDATION_COUNT);
-    const targetRange = buildTargetRange(recommendations);
+    const payload = buildCorePayload(draws);
+    storeCorePayload(draws, payload);
     res.json({
-      recommendations,
-      targetRange,
-      customRecommendation: buildCustomRecommendation(draws, targetRange.defaultHit3Rate)
+      recommendations: payload.recommendations,
+      targetRange: payload.targetRange,
+      customRecommendation: payload.customRecommendation,
+      calcStatus: getCalculationStatus(draws)
     });
   } catch (error) {
     res.status(500).json({ error: error.message || "추천 조합을 만들지 못했습니다." });
@@ -1317,18 +1451,40 @@ app.post("/api/lotto/custom-recommendation", async (req, res) => {
 app.get("/api/lotto/backtest", async (_req, res) => {
   try {
     const draws = await getAvailableDraws(false);
+    const cache = readAppCache();
     res.json({
-      backtest: buildBacktestSnapshot(draws)
+      backtest: cache.backtest?.payload || null,
+      calcStatus: getCalculationStatus(draws, cache)
     });
   } catch (error) {
     res.status(500).json({ error: error.message || "백테스트를 수행하지 못했습니다." });
   }
 });
 
+app.post("/api/lotto/backtest", async (_req, res) => {
+  try {
+    const draws = await getAvailableDraws(false);
+    const payload = buildBacktestSnapshot(draws);
+    storeBacktestPayload(draws, payload);
+    res.json({
+      backtest: payload,
+      calcStatus: getCalculationStatus(draws)
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "남은 계산을 마무리하지 못했습니다." });
+  }
+});
+
 app.post("/api/lotto/sync", async (_req, res) => {
   try {
-    await syncLatestDraws(true);
-    sendAppState(res);
+    const draws = await getAvailableDraws(true);
+    const syncState = readSyncState();
+    res.json({
+      sync: syncState,
+      latestMeta: getLatestDrawMeta(draws),
+      calcStatus: getCalculationStatus(draws),
+      updated: true
+    });
   } catch (error) {
     res.status(500).json({ error: error.message || "최신 데이터를 동기화하지 못했습니다." });
   }

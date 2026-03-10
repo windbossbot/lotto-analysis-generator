@@ -46,8 +46,19 @@
             <p id="sync-caption">최신 회차 확인 중입니다.</p>
           </div>
           <div class="sync-actions">
-            <button id="refresh-button" type="button" class="ghost">분석 다시 계산</button>
             <button id="sync-button" type="button">최신 회차 다시 가져오기</button>
+            <button id="refresh-button" type="button" class="ghost">계산하기</button>
+            <button id="finish-button" type="button" class="ghost">남은 계산 마무리</button>
+          </div>
+        </div>
+        <div class="sync-facts">
+          <div class="sync-fact">
+            <span>최신 회차</span>
+            <strong id="latest-round-label">-</strong>
+          </div>
+          <div class="sync-fact">
+            <span>추첨일</span>
+            <strong id="latest-date-label">-</strong>
           </div>
         </div>
         <div id="loading-panel" class="loading-panel">
