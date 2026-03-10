@@ -1141,6 +1141,10 @@ function sendAppState(res) {
 }
 
 async function getAvailableDraws(forceSync = false) {
+  if (!forceSync) {
+    return readDraws().sort((a, b) => b.round - a.round);
+  }
+
   try {
     const result = await syncLatestDraws(forceSync);
     return result.draws.sort((a, b) => b.round - a.round);
@@ -1151,6 +1155,14 @@ async function getAvailableDraws(forceSync = false) {
       return draws;
     }
     throw error;
+  }
+}
+
+async function refreshDrawsInBackground(force = false) {
+  try {
+    await syncLatestDraws(force);
+  } catch (error) {
+    console.warn(`Background lotto sync skipped: ${error.message}`);
   }
 }
 
@@ -1287,4 +1299,10 @@ app.post("/api/lotto/sync", async (_req, res) => {
 app.listen(port, "0.0.0.0", () => {
   ensureStorage();
   console.log(`Lotto analyzer listening on http://0.0.0.0:${port}`);
+  setTimeout(() => {
+    refreshDrawsInBackground(false);
+  }, 3000);
+  setInterval(() => {
+    refreshDrawsInBackground(false);
+  }, SYNC_INTERVAL_MS);
 });
