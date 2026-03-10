@@ -22,6 +22,8 @@ const BACKTEST_CANDIDATE_POOL_SIZE = 40;
 const TARGET_HIT3_RATE_MIN = 1;
 const TARGET_HIT3_RATE_MAX = 7;
 const TARGET_HIT3_RATE_STEP = 0.1;
+let drawsMemoryCache = null;
+let syncInFlight = null;
 const snapshotCache = {
   coreKey: null,
   coreValue: null,
@@ -58,13 +60,18 @@ function ensureStorage() {
 
 function readDraws() {
   ensureStorage();
+  if (drawsMemoryCache) {
+    return drawsMemoryCache.map((draw) => ({ ...draw, numbers: [...draw.numbers] }));
+  }
   const raw = fs.readFileSync(drawsFile, "utf8");
   const parsed = JSON.parse(raw);
-  return Array.isArray(parsed) ? parsed.map(normalizeDraw).filter(Boolean) : [];
+  drawsMemoryCache = Array.isArray(parsed) ? parsed.map(normalizeDraw).filter(Boolean) : [];
+  return drawsMemoryCache.map((draw) => ({ ...draw, numbers: [...draw.numbers] }));
 }
 
 function writeDraws(draws) {
   ensureStorage();
+  drawsMemoryCache = draws.map((draw) => ({ ...draw, numbers: [...draw.numbers] }));
   fs.writeFileSync(drawsFile, `${JSON.stringify(draws, null, 2)}\n`, "utf8");
 }
 
@@ -203,7 +210,7 @@ async function fetchBatchDraws(round) {
   return list.map(normalizeBatchDraw).filter(Boolean);
 }
 
-async function syncLatestDraws(force = false) {
+async function performSyncLatestDraws(force = false) {
   ensureStorage();
 
   const syncState = readSyncState();
@@ -218,6 +225,7 @@ async function syncLatestDraws(force = false) {
   }
 
   const localDraws = readDraws().sort((a, b) => a.round - b.round);
+  const localLatestRound = localDraws[localDraws.length - 1]?.round || 0;
   const resultPage = await fetchText(LOTTO_RESULT_PAGE);
   const latestRound = parseLatestRound(resultPage);
 
@@ -225,12 +233,30 @@ async function syncLatestDraws(force = false) {
     throw new Error("최신 회차 정보를 찾지 못했습니다.");
   }
 
+  if (localLatestRound >= latestRound) {
+    writeSyncState({
+      lastSyncedAt: new Date().toISOString(),
+      latestRound: localLatestRound
+    });
+
+    return {
+      updated: false,
+      draws: localDraws,
+      fetchedCount: 0
+    };
+  }
+
   const byRound = new Map(localDraws.map((draw) => [draw.round, draw]));
   let fetchedCount = 0;
+  const fetchStartRound = localLatestRound > 0 ? latestRound : latestRound;
+  const fetchFloorRound = localLatestRound > 0 ? localLatestRound + 1 : 1;
 
-  for (let round = latestRound; round >= 1; round -= 10) {
+  for (let round = fetchStartRound; round >= fetchFloorRound; round -= 10) {
     const batch = await fetchBatchDraws(round);
     batch.forEach((draw) => {
+      if (draw.round < fetchFloorRound) {
+        return;
+      }
       const before = byRound.has(draw.round);
       byRound.set(draw.round, draw);
       if (!before) {
@@ -238,7 +264,7 @@ async function syncLatestDraws(force = false) {
       }
     });
 
-    if (round <= 10) {
+    if (round <= fetchFloorRound + 9) {
       break;
     }
   }
@@ -260,6 +286,18 @@ async function syncLatestDraws(force = false) {
     draws: merged,
     fetchedCount
   };
+}
+
+async function syncLatestDraws(force = false) {
+  if (syncInFlight) {
+    return syncInFlight;
+  }
+
+  syncInFlight = performSyncLatestDraws(force).finally(() => {
+    syncInFlight = null;
+  });
+
+  return syncInFlight;
 }
 
 function validateDrawInput(body) {
