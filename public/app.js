@@ -7,7 +7,11 @@ const state = {
   customRecommendation: null,
   targetRange: null,
   calcStatus: null,
-  latestMeta: null
+  latestMeta: null,
+  flow: {
+    syncDone: false,
+    coreDone: false
+  }
 };
 
 const summaryCardsEl = document.getElementById("summary-cards");
@@ -32,6 +36,7 @@ const refreshButtonEl = document.getElementById("refresh-button");
 const finishButtonEl = document.getElementById("finish-button");
 const latestRoundLabelEl = document.getElementById("latest-round-label");
 const latestDateLabelEl = document.getElementById("latest-date-label");
+const flowGuideEl = document.getElementById("flow-guide");
 const avgSumEl = document.getElementById("avg-sum");
 const avgOddEl = document.getElementById("avg-odd");
 const avgAcEl = document.getElementById("avg-ac");
@@ -111,10 +116,22 @@ function renderSyncFacts() {
 
 function updateCalcButtons() {
   const status = state.calcStatus || {};
-  refreshButtonEl.disabled = false;
-  finishButtonEl.disabled = false;
-  refreshButtonEl.textContent = status.coreNeedsRefresh ? "계산하기" : "기본 계산 다시하기";
-  finishButtonEl.textContent = status.backtestNeedsRefresh ? "남은 계산 마무리" : "백테스트 다시 계산";
+  refreshButtonEl.disabled = !state.flow.syncDone;
+  finishButtonEl.disabled = !state.flow.coreDone;
+  refreshButtonEl.textContent = status.coreNeedsRefresh ? "2. 계산하기" : "2. 기본 계산 다시하기";
+  finishButtonEl.textContent = status.backtestNeedsRefresh ? "3. 남은 계산 마무리" : "3. 백테스트 다시 계산";
+
+  if (!state.flow.syncDone) {
+    flowGuideEl.textContent = "1단계로 최신 회차를 먼저 가져오세요. 계산 버튼은 그다음 열립니다.";
+    return;
+  }
+
+  if (!state.flow.coreDone) {
+    flowGuideEl.textContent = "최신 회차 반영이 끝났습니다. 이제 2단계 계산하기로 추천과 분석을 갱신하세요.";
+    return;
+  }
+
+  flowGuideEl.textContent = "기본 계산이 끝났습니다. 필요하면 3단계 남은 계산 마무리로 백테스트를 계산하세요.";
 }
 
 function temperatureItem(item, type) {
@@ -662,7 +679,7 @@ async function fetchApp() {
   setLoadingState("기본 데이터를 불러오는 중", "저장된 회차와 추천 조합을 준비하고 있습니다.", 28, "active");
   const payload = await sendJsonWithRetry("/api/lotto");
   syncApp(payload);
-  setLoadingState("기본 분석 완료", "추천 조합과 번호 순위까지 준비됐습니다. 백테스트를 이어서 계산합니다.", 58, "active");
+  setLoadingState("대기 중", "1단계 최신 회차 가져오기를 누르면 새 데이터를 먼저 반영합니다.", 12, "done");
 }
 
 async function fetchBacktest() {
@@ -678,7 +695,7 @@ async function fetchBacktest() {
   } else {
     backtestCaptionEl.textContent = "백테스트가 아직 계산되지 않았습니다. 상단의 '남은 계산 마무리'를 눌러주세요.";
     backtestHistoryEl.innerHTML = `<div class="empty-state">백테스트는 필요할 때만 계산하도록 바뀌었습니다.</div>`;
-    setLoadingState("기본 분석 완료", "기본 화면은 준비됐습니다. 필요하면 남은 계산을 마무리하세요.", 68, "done");
+    setLoadingState("대기 중", "기본 화면은 준비됐습니다. 1단계부터 순서대로 진행하세요.", 12, "done");
   }
 }
 
@@ -747,7 +764,9 @@ async function onRefreshClick() {
     renderCustomRecommendation();
     renderQuickPicks();
     renderRecommendations();
-    setLoadingState("기본 계산 완료", "추천 조합과 핵심 분석을 다시 계산했습니다.", 72, "done");
+    state.flow.coreDone = true;
+    updateCalcButtons();
+    setLoadingState("기본 계산 완료", "추천 조합과 핵심 분석을 다시 계산했습니다. 원하면 마지막 단계로 넘어가세요.", 66, "done");
     statusMessageEl.textContent = "기본 분석과 추천 계산을 다시 완료했습니다.";
   } catch (error) {
     setLoadingState("기본 계산 실패", error.message, 100, "error");
@@ -791,10 +810,12 @@ async function onSyncClick() {
     });
     state.calcStatus = payload.calcStatus || state.calcStatus;
     state.latestMeta = payload.latestMeta || state.latestMeta;
+    state.flow.syncDone = true;
+    state.flow.coreDone = false;
     renderSyncFacts();
     updateCalcButtons();
     syncCaptionEl.textContent = formatSyncLabel(payload.sync);
-    setLoadingState("최신 회차 반영 완료", "새 회차 확인이 끝났습니다. 이제 계산하기를 눌러 분석을 갱신하세요.", 48, "done");
+    setLoadingState("최신 회차 반영 완료", "새 회차 확인이 끝났습니다. 이제 2단계 계산하기를 진행하세요.", 33, "done");
     statusMessageEl.textContent = "최신 회차 동기화를 완료했습니다.";
   } catch (error) {
     setLoadingState("동기화 실패", error.message, 100, "error");

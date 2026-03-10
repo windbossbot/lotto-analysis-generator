@@ -175,6 +175,12 @@ h1 {
   margin-bottom: 14px;
 }
 
+.flow-guide {
+  margin: -4px 0 14px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
 .sync-fact {
   padding: 12px 14px;
   border-radius: 18px;
@@ -725,8 +731,8 @@ button {
 }
 
 button:disabled {
-  cursor: wait;
-  opacity: 0.7;
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 button.ghost {
