@@ -553,14 +553,44 @@ async function sendJson(url, options = {}) {
   return payload;
 }
 
+function wait(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+async function sendJsonWithRetry(url, options = {}, retryOptions = {}) {
+  const retries = retryOptions.retries ?? 4;
+  const delayMs = retryOptions.delayMs ?? 1500;
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await sendJson(url, options);
+    } catch (error) {
+      lastError = error;
+      if (attempt === retries) {
+        break;
+      }
+
+      const nextDelay = delayMs * (attempt + 1);
+      analysisCaptionEl.textContent = `서버를 깨우는 중입니다... ${attempt + 1}/${retries + 1}`;
+      syncCaptionEl.textContent = `첫 응답이 느려 재시도 중입니다... ${Math.round(nextDelay / 1000)}초 후 다시 시도합니다.`;
+      await wait(nextDelay);
+    }
+  }
+
+  throw lastError;
+}
+
 async function fetchApp() {
-  const payload = await sendJson("/api/lotto");
+  const payload = await sendJsonWithRetry("/api/lotto");
   syncApp(payload);
 }
 
 async function fetchBacktest() {
   backtestCaptionEl.textContent = "백테스트를 계산하는 중입니다...";
-  const payload = await sendJson("/api/lotto/backtest");
+  const payload = await sendJsonWithRetry("/api/lotto/backtest", {}, { retries: 2, delayMs: 2000 });
   state.backtest = payload.backtest || null;
   renderBacktest();
 }
