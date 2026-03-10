@@ -3,6 +3,7 @@ node_modules/
 Thumbs.db
 .env
 .env.*
+data/lotto-app-cache.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

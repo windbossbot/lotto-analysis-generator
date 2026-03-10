@@ -17,9 +17,10 @@ const LOTTO_RESULT_PAGE = "https://www.dhlottery.co.kr/lt645/result";
 const LOTTO_BATCH_API = "https://www.dhlottery.co.kr/lt645/selectPstLt645InfoNew.do?srchDir=center&srchLtEpsd=";
 const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const BACKTEST_WARMUP_DRAWS = 80;
-const BACKTEST_WINDOW = 120;
+const BACKTEST_WINDOW = 60;
 const LIVE_CANDIDATE_POOL_SIZE = 180;
-const BACKTEST_CANDIDATE_POOL_SIZE = 40;
+const BACKTEST_CANDIDATE_POOL_SIZE = 10;
+const BACKTEST_ROUNDS = 5;
 const TARGET_HIT3_RATE_MIN = 1;
 const TARGET_HIT3_RATE_MAX = 7;
 const TARGET_HIT3_RATE_STEP = 0.1;
@@ -1184,7 +1185,7 @@ function buildBacktestSnapshot(draws) {
     return snapshotCache.backtestValue;
   }
 
-  const value = runBacktest(sortedDraws, 26);
+  const value = runBacktest(sortedDraws, BACKTEST_ROUNDS);
   snapshotCache.backtestKey = cacheKey;
   snapshotCache.backtestValue = value;
   return value;
