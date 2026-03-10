@@ -96,6 +96,18 @@ function setLoadingState(title, step, progress, mode = "active") {
   loadingPanelEl.classList.toggle("error", mode === "error");
 }
 
+function beginActionProgress(actionLabel, step) {
+  setLoadingState(`${actionLabel} 시작`, step, 8, "active");
+}
+
+function advanceActionProgress(actionLabel, step, progress) {
+  setLoadingState(actionLabel, step, progress, "active");
+}
+
+function completeActionProgress(actionLabel, step) {
+  setLoadingState(`${actionLabel} 완료`, step, 100, "done");
+}
+
 function formatSyncLabel(sync) {
   if (!sync?.lastSyncedAt) {
     return "아직 동기화 기록이 없습니다.";
@@ -747,10 +759,11 @@ async function onGenerateClick() {
 
 async function onRefreshClick() {
   refreshButtonEl.disabled = true;
-  setLoadingState("기본 계산 중", "저장된 회차 기준으로 추천과 분석을 다시 계산합니다.", 42, "active");
+  beginActionProgress("계산하기", "저장된 회차 기준으로 추천과 분석 계산을 시작합니다.");
   statusMessageEl.textContent = "현재 저장된 회차 기준으로 기본 분석을 다시 계산하는 중입니다.";
 
   try {
+    advanceActionProgress("계산하기", "추천 조합과 번호 순위를 계산하고 있습니다.", 56);
     const payload = await sendJson("/api/lotto/recommendations", {
       method: "POST"
     });
@@ -766,7 +779,7 @@ async function onRefreshClick() {
     renderRecommendations();
     state.flow.coreDone = true;
     updateCalcButtons();
-    setLoadingState("기본 계산 완료", "추천 조합과 핵심 분석을 다시 계산했습니다. 원하면 마지막 단계로 넘어가세요.", 66, "done");
+    completeActionProgress("계산하기", "추천 조합과 핵심 분석 계산이 끝났습니다. 필요하면 마지막 단계를 진행하세요.");
     statusMessageEl.textContent = "기본 분석과 추천 계산을 다시 완료했습니다.";
   } catch (error) {
     setLoadingState("기본 계산 실패", error.message, 100, "error");
@@ -778,10 +791,11 @@ async function onRefreshClick() {
 
 async function onFinishClick() {
   finishButtonEl.disabled = true;
-  setLoadingState("남은 계산 마무리 중", "백테스트와 남은 검증 계산을 진행합니다.", 78, "active");
+  beginActionProgress("남은 계산 마무리", "백테스트와 남은 검증 계산을 시작합니다.");
   statusMessageEl.textContent = "남은 계산을 마무리하는 중입니다.";
 
   try {
+    advanceActionProgress("남은 계산 마무리", "과거 회차 기준 백테스트를 계산하고 있습니다.", 64);
     const payload = await sendJson("/api/lotto/backtest", {
       method: "POST"
     });
@@ -789,7 +803,7 @@ async function onFinishClick() {
     state.calcStatus = payload.calcStatus || state.calcStatus;
     updateCalcButtons();
     renderBacktest();
-    setLoadingState("모든 계산 완료", "백테스트까지 포함한 계산이 모두 끝났습니다.", 100, "done");
+    completeActionProgress("남은 계산 마무리", "백테스트까지 포함한 계산이 모두 끝났습니다.");
     statusMessageEl.textContent = "남은 계산까지 모두 완료했습니다.";
   } catch (error) {
     setLoadingState("남은 계산 실패", error.message, 100, "error");
@@ -801,10 +815,11 @@ async function onFinishClick() {
 
 async function onSyncClick() {
   syncButtonEl.disabled = true;
-  setLoadingState("최신 회차 동기화 중", "공식 회차 데이터를 다시 확인하고 있습니다.", 34, "active");
+  beginActionProgress("최신 회차 가져오기", "공식 회차 데이터 확인을 시작합니다.");
   syncCaptionEl.textContent = "최신 회차를 다시 확인하는 중입니다...";
 
   try {
+    advanceActionProgress("최신 회차 가져오기", "최신 회차와 추첨일을 확인하고 있습니다.", 52);
     const payload = await sendJson("/api/lotto/sync", {
       method: "POST"
     });
@@ -815,7 +830,7 @@ async function onSyncClick() {
     renderSyncFacts();
     updateCalcButtons();
     syncCaptionEl.textContent = formatSyncLabel(payload.sync);
-    setLoadingState("최신 회차 반영 완료", "새 회차 확인이 끝났습니다. 이제 2단계 계산하기를 진행하세요.", 33, "done");
+    completeActionProgress("최신 회차 가져오기", "새 회차 확인이 끝났습니다. 이제 2단계 계산하기를 진행하세요.");
     statusMessageEl.textContent = "최신 회차 동기화를 완료했습니다.";
   } catch (error) {
     setLoadingState("동기화 실패", error.message, 100, "error");
