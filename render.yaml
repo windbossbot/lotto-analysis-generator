@@ -2,7 +2,7 @@ services:
   - type: web
     name: lotto-analysis-generator
     runtime: node
-    plan: starter
+    plan: free
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/lotto
