@@ -564,6 +564,35 @@ async function sendJson(url, options = {}) {
   return payload;
 }
 
+async function waitForHealth(retries = 8, delayMs = 1500) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const payload = await sendJson("/health");
+      if (payload?.ok) {
+        return true;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+
+    if (attempt === retries) {
+      break;
+    }
+
+    const nextDelay = delayMs * (attempt + 1);
+    setLoadingState(
+      "서버 준비 확인 중",
+      `헬스 체크를 확인하는 중입니다. ${Math.round(nextDelay / 1000)}초 후 다시 확인합니다.`,
+      12 + ((attempt + 1) / (retries + 1)) * 18
+    );
+    await wait(nextDelay);
+  }
+
+  throw lastError || new Error("서버 준비 상태를 확인하지 못했습니다.");
+}
+
 function wait(ms) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -600,6 +629,8 @@ async function sendJsonWithRetry(url, options = {}, retryOptions = {}) {
 }
 
 async function fetchApp() {
+  setLoadingState("서버 상태 확인 중", "Render 인스턴스가 준비됐는지 먼저 확인합니다.", 10);
+  await waitForHealth();
   setLoadingState("기본 데이터를 불러오는 중", "저장된 회차와 추천 조합을 준비하고 있습니다.", 24);
   const payload = await sendJsonWithRetry("/api/lotto");
   syncApp(payload);
