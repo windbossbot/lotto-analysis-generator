@@ -1123,6 +1123,20 @@ function sendAppState(res) {
   });
 }
 
+async function getAvailableDraws(forceSync = false) {
+  try {
+    const result = await syncLatestDraws(forceSync);
+    return result.draws.sort((a, b) => b.round - a.round);
+  } catch (error) {
+    const draws = readDraws().sort((a, b) => b.round - a.round);
+    if (draws.length) {
+      console.warn(`Lotto sync fallback: ${error.message}`);
+      return draws;
+    }
+    throw error;
+  }
+}
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -1132,8 +1146,27 @@ app.get("/health", (_req, res) => {
 
 app.get("/api/lotto", async (_req, res) => {
   try {
-    await syncLatestDraws(false);
-    sendAppState(res);
+    const draws = await getAvailableDraws(false);
+    const snapshot = buildSnapshot(draws);
+    const recommendations = buildRecommendations(draws, RECOMMENDATION_COUNT);
+    const targetRange = buildTargetRange(recommendations);
+    const customRecommendation = buildCustomRecommendation(draws, targetRange.defaultHit3Rate);
+    const syncState = readSyncState();
+
+    res.json({
+      draws,
+      analysis: snapshot.analysis,
+      nextNumberRanking: snapshot.nextNumberRanking,
+      recommendations,
+      customRecommendation,
+      targetRange,
+      sync: syncState,
+      limits: {
+        min: LOTTO_MIN,
+        max: LOTTO_MAX,
+        picks: PICKS_PER_DRAW
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message || "로또 데이터를 불러오지 못했습니다." });
   }
@@ -1177,14 +1210,13 @@ app.delete("/api/lotto/draws/:round", (req, res) => {
 
 app.post("/api/lotto/recommendations", async (_req, res) => {
   try {
-    const { draws } = await syncLatestDraws(false);
-    const sortedDraws = draws.sort((a, b) => b.round - a.round);
-    const recommendations = buildRecommendations(sortedDraws, RECOMMENDATION_COUNT);
+    const draws = await getAvailableDraws(false);
+    const recommendations = buildRecommendations(draws, RECOMMENDATION_COUNT);
     const targetRange = buildTargetRange(recommendations);
     res.json({
       recommendations,
       targetRange,
-      customRecommendation: buildCustomRecommendation(sortedDraws, targetRange.defaultHit3Rate)
+      customRecommendation: buildCustomRecommendation(draws, targetRange.defaultHit3Rate)
     });
   } catch (error) {
     res.status(500).json({ error: error.message || "추천 조합을 만들지 못했습니다." });
@@ -1193,9 +1225,9 @@ app.post("/api/lotto/recommendations", async (_req, res) => {
 
 app.post("/api/lotto/custom-recommendation", async (req, res) => {
   try {
-    const { draws } = await syncLatestDraws(false);
+    const draws = await getAvailableDraws(false);
     const customRecommendation = buildCustomRecommendation(
-      draws.sort((a, b) => b.round - a.round),
+      draws,
       req.body?.targetHit3Rate,
       req.body?.fixedNumber
     );
@@ -1213,7 +1245,7 @@ app.post("/api/lotto/custom-recommendation", async (req, res) => {
 
 app.get("/api/lotto/backtest", async (_req, res) => {
   try {
-    const { draws } = await syncLatestDraws(false);
+    const draws = await getAvailableDraws(false);
     res.json({
       backtest: buildSnapshot(draws).backtest
     });

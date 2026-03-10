@@ -532,7 +532,19 @@ async function sendJson(url, options = {}) {
     headers: { "Content-Type": "application/json" },
     ...options
   });
-  const payload = await response.json();
+  const raw = await response.text();
+  let payload = {};
+
+  if (raw) {
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      if (!response.ok) {
+        throw new Error("서버가 JSON이 아닌 응답을 반환했습니다.");
+      }
+      throw new Error("응답을 읽는 중 문제가 발생했습니다.");
+    }
+  }
 
   if (!response.ok) {
     throw new Error(payload.error || "요청에 실패했습니다.");
