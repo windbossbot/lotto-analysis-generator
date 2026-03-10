@@ -1284,7 +1284,7 @@ app.post("/api/lotto/sync", async (_req, res) => {
   }
 });
 
-app.listen(port, () => {
+app.listen(port, "0.0.0.0", () => {
   ensureStorage();
-  console.log(`Lotto analyzer listening on http://localhost:${port}`);
+  console.log(`Lotto analyzer listening on http://0.0.0.0:${port}`);
 });
