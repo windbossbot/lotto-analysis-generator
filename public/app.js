@@ -26,6 +26,7 @@ const targetHit3RangeEl = document.getElementById("target-hit3-range");
 const targetHit3InputEl = document.getElementById("target-hit3-input");
 const targetFixedNumberEl = document.getElementById("target-fixed-number");
 const syncButtonEl = document.getElementById("sync-button");
+const refreshButtonEl = document.getElementById("refresh-button");
 const avgSumEl = document.getElementById("avg-sum");
 const avgOddEl = document.getElementById("avg-odd");
 const avgAcEl = document.getElementById("avg-ac");
@@ -76,11 +77,13 @@ function summaryCard(label, value, meta) {
   `;
 }
 
-function setLoadingState(title, step, progress, done = false) {
+function setLoadingState(title, step, progress, mode = "active") {
   loadingTitleEl.textContent = title;
   loadingStepEl.textContent = step;
   loadingBarEl.style.width = `${Math.max(8, Math.min(100, progress))}%`;
-  loadingPanelEl.classList.toggle("done", done);
+  loadingPanelEl.classList.toggle("done", mode === "done");
+  loadingPanelEl.classList.toggle("active", mode === "active");
+  loadingPanelEl.classList.toggle("error", mode === "error");
 }
 
 function formatSyncLabel(sync) {
@@ -585,7 +588,8 @@ async function waitForHealth(retries = 8, delayMs = 1500) {
     setLoadingState(
       "서버 준비 확인 중",
       `헬스 체크를 확인하는 중입니다. ${Math.round(nextDelay / 1000)}초 후 다시 확인합니다.`,
-      12 + ((attempt + 1) / (retries + 1)) * 18
+      12 + ((attempt + 1) / (retries + 1)) * 18,
+      "active"
     );
     await wait(nextDelay);
   }
@@ -617,7 +621,8 @@ async function sendJsonWithRetry(url, options = {}, retryOptions = {}) {
       setLoadingState(
         "서버를 깨우는 중",
         `첫 응답이 느려 재시도합니다. ${Math.round(nextDelay / 1000)}초 후 다시 시도합니다.`,
-        18 + ((attempt + 1) / (retries + 1)) * 42
+        18 + ((attempt + 1) / (retries + 1)) * 28,
+        "active"
       );
       analysisCaptionEl.textContent = `서버를 깨우는 중입니다... ${attempt + 1}/${retries + 1}`;
       syncCaptionEl.textContent = `첫 응답이 느려 재시도 중입니다... ${Math.round(nextDelay / 1000)}초 후 다시 시도합니다.`;
@@ -629,21 +634,21 @@ async function sendJsonWithRetry(url, options = {}, retryOptions = {}) {
 }
 
 async function fetchApp() {
-  setLoadingState("서버 상태 확인 중", "Render 인스턴스가 준비됐는지 먼저 확인합니다.", 10);
+  setLoadingState("서버 상태 확인 중", "Render 인스턴스가 준비됐는지 먼저 확인합니다.", 10, "active");
   await waitForHealth();
-  setLoadingState("기본 데이터를 불러오는 중", "저장된 회차와 추천 조합을 준비하고 있습니다.", 24);
+  setLoadingState("기본 데이터를 불러오는 중", "저장된 회차와 추천 조합을 준비하고 있습니다.", 28, "active");
   const payload = await sendJsonWithRetry("/api/lotto");
   syncApp(payload);
-  setLoadingState("기본 데이터 준비 완료", "추천 조합과 번호 순위를 표시했습니다. 백테스트는 이어서 불러옵니다.", 76);
+  setLoadingState("기본 분석 완료", "추천 조합과 번호 순위까지 준비됐습니다. 백테스트를 이어서 계산합니다.", 58, "active");
 }
 
 async function fetchBacktest() {
   backtestCaptionEl.textContent = "백테스트를 계산하는 중입니다...";
-  setLoadingState("백테스트 계산 중", "과거 회차 기준 검증 데이터를 만드는 중입니다.", 84);
+  setLoadingState("백테스트 계산 중", "과거 회차 기준 검증 데이터를 만드는 중입니다.", 74, "active");
   const payload = await sendJsonWithRetry("/api/lotto/backtest", {}, { retries: 2, delayMs: 2000 });
   state.backtest = payload.backtest || null;
   renderBacktest();
-  setLoadingState("로딩 완료", "모든 분석 데이터가 준비되었습니다.", 100, true);
+  setLoadingState("로딩 완료", "모든 분석 데이터가 준비되었습니다.", 100, "done");
 }
 
 async function onTargetGenerateClick() {
@@ -690,8 +695,24 @@ async function onGenerateClick() {
   }
 }
 
+async function onRefreshClick() {
+  refreshButtonEl.disabled = true;
+  statusMessageEl.textContent = "현재 저장된 회차 기준으로 분석을 다시 계산하는 중입니다.";
+
+  try {
+    await fetchApp();
+    await fetchBacktest();
+    statusMessageEl.textContent = "분석과 추천 계산을 다시 완료했습니다.";
+  } catch (error) {
+    statusMessageEl.textContent = error.message;
+  } finally {
+    refreshButtonEl.disabled = false;
+  }
+}
+
 async function onSyncClick() {
   syncButtonEl.disabled = true;
+  setLoadingState("최신 회차 동기화 중", "공식 회차 데이터를 다시 확인하고 있습니다.", 34, "active");
   syncCaptionEl.textContent = "최신 회차를 다시 확인하는 중입니다...";
 
   try {
@@ -699,8 +720,10 @@ async function onSyncClick() {
       method: "POST"
     });
     syncApp(payload);
+    setLoadingState("기본 분석 완료", "최신 회차를 반영했습니다. 필요하면 분석 다시 계산을 눌러도 됩니다.", 62, "done");
     statusMessageEl.textContent = "최신 회차 동기화를 완료했습니다.";
   } catch (error) {
+    setLoadingState("동기화 실패", error.message, 100, "error");
     syncCaptionEl.textContent = error.message;
   } finally {
     syncButtonEl.disabled = false;
@@ -727,6 +750,7 @@ async function onHistoryClick(event) {
 generateButtonEl.addEventListener("click", onGenerateClick);
 targetGenerateButtonEl.addEventListener("click", onTargetGenerateClick);
 syncButtonEl.addEventListener("click", onSyncClick);
+refreshButtonEl.addEventListener("click", onRefreshClick);
 drawHistoryEl.addEventListener("click", onHistoryClick);
 targetHit3RangeEl.addEventListener("input", (event) => {
   syncTargetInputs(event.target.value);
@@ -739,14 +763,14 @@ targetFixedNumberEl.addEventListener("change", () => {
 });
 
 fetchApp().catch((error) => {
-  setLoadingState("불러오기 실패", error.message, 100, true);
+  setLoadingState("불러오기 실패", error.message, 100, "error");
   analysisCaptionEl.textContent = error.message;
   syncCaptionEl.textContent = error.message;
   drawHistoryEl.innerHTML = `<div class="empty-state">데이터를 불러오지 못했습니다.</div>`;
 });
 
 fetchBacktest().catch((error) => {
-  setLoadingState("부분 로딩 완료", "기본 화면은 준비됐지만 백테스트는 불러오지 못했습니다.", 100, true);
+  setLoadingState("부분 로딩 완료", "기본 화면은 준비됐지만 백테스트는 불러오지 못했습니다.", 100, "done");
   backtestCaptionEl.textContent = error.message;
   backtestHistoryEl.innerHTML = `<div class="empty-state">백테스트를 불러오지 못했습니다.</div>`;
 });
