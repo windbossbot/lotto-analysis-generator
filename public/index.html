@@ -47,6 +47,15 @@
           </div>
           <button id="sync-button" type="button">최신 회차 다시 가져오기</button>
         </div>
+        <div id="loading-panel" class="loading-panel">
+          <div class="loading-meta">
+            <strong id="loading-title">서버 준비 중</strong>
+            <span id="loading-step">첫 응답을 기다리는 중입니다.</span>
+          </div>
+          <div class="loading-track" aria-hidden="true">
+            <div id="loading-bar" class="loading-bar"></div>
+          </div>
+        </div>
         <p id="status-message" class="status-message"></p>
       </section>
 

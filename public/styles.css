@@ -233,6 +233,52 @@ h1 {
   color: var(--muted);
 }
 
+.loading-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.56);
+  border: 1px solid var(--line);
+}
+
+.loading-panel.done {
+  opacity: 0.72;
+}
+
+.loading-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.loading-meta strong {
+  font-size: 0.96rem;
+}
+
+.loading-meta span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.loading-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #eadfce;
+}
+
+.loading-bar {
+  width: 18%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--gold) 0%, var(--accent) 100%);
+  transition: width 0.35s ease;
+}
+
 .custom-recommendation {
   margin-top: 14px;
   border: 0;

@@ -15,6 +15,10 @@ const customRecommendationEl = document.getElementById("custom-recommendation");
 const analysisCaptionEl = document.getElementById("analysis-caption");
 const syncCaptionEl = document.getElementById("sync-caption");
 const statusMessageEl = document.getElementById("status-message");
+const loadingPanelEl = document.getElementById("loading-panel");
+const loadingTitleEl = document.getElementById("loading-title");
+const loadingStepEl = document.getElementById("loading-step");
+const loadingBarEl = document.getElementById("loading-bar");
 const targetCaptionEl = document.getElementById("target-caption");
 const targetHelpEl = document.getElementById("target-help");
 const targetGenerateButtonEl = document.getElementById("target-generate-button");
@@ -70,6 +74,13 @@ function summaryCard(label, value, meta) {
       <small>${escapeHtml(meta)}</small>
     </article>
   `;
+}
+
+function setLoadingState(title, step, progress, done = false) {
+  loadingTitleEl.textContent = title;
+  loadingStepEl.textContent = step;
+  loadingBarEl.style.width = `${Math.max(8, Math.min(100, progress))}%`;
+  loadingPanelEl.classList.toggle("done", done);
 }
 
 function formatSyncLabel(sync) {
@@ -574,6 +585,11 @@ async function sendJsonWithRetry(url, options = {}, retryOptions = {}) {
       }
 
       const nextDelay = delayMs * (attempt + 1);
+      setLoadingState(
+        "서버를 깨우는 중",
+        `첫 응답이 느려 재시도합니다. ${Math.round(nextDelay / 1000)}초 후 다시 시도합니다.`,
+        18 + ((attempt + 1) / (retries + 1)) * 42
+      );
       analysisCaptionEl.textContent = `서버를 깨우는 중입니다... ${attempt + 1}/${retries + 1}`;
       syncCaptionEl.textContent = `첫 응답이 느려 재시도 중입니다... ${Math.round(nextDelay / 1000)}초 후 다시 시도합니다.`;
       await wait(nextDelay);
@@ -584,15 +600,19 @@ async function sendJsonWithRetry(url, options = {}, retryOptions = {}) {
 }
 
 async function fetchApp() {
+  setLoadingState("기본 데이터를 불러오는 중", "저장된 회차와 추천 조합을 준비하고 있습니다.", 24);
   const payload = await sendJsonWithRetry("/api/lotto");
   syncApp(payload);
+  setLoadingState("기본 데이터 준비 완료", "추천 조합과 번호 순위를 표시했습니다. 백테스트는 이어서 불러옵니다.", 76);
 }
 
 async function fetchBacktest() {
   backtestCaptionEl.textContent = "백테스트를 계산하는 중입니다...";
+  setLoadingState("백테스트 계산 중", "과거 회차 기준 검증 데이터를 만드는 중입니다.", 84);
   const payload = await sendJsonWithRetry("/api/lotto/backtest", {}, { retries: 2, delayMs: 2000 });
   state.backtest = payload.backtest || null;
   renderBacktest();
+  setLoadingState("로딩 완료", "모든 분석 데이터가 준비되었습니다.", 100, true);
 }
 
 async function onTargetGenerateClick() {
@@ -688,12 +708,14 @@ targetFixedNumberEl.addEventListener("change", () => {
 });
 
 fetchApp().catch((error) => {
+  setLoadingState("불러오기 실패", error.message, 100, true);
   analysisCaptionEl.textContent = error.message;
   syncCaptionEl.textContent = error.message;
   drawHistoryEl.innerHTML = `<div class="empty-state">데이터를 불러오지 못했습니다.</div>`;
 });
 
 fetchBacktest().catch((error) => {
+  setLoadingState("부분 로딩 완료", "기본 화면은 준비됐지만 백테스트는 불러오지 못했습니다.", 100, true);
   backtestCaptionEl.textContent = error.message;
   backtestHistoryEl.innerHTML = `<div class="empty-state">백테스트를 불러오지 못했습니다.</div>`;
 });
