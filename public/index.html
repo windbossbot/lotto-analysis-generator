@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- 2026-03-16: 상단 스택 레이아웃 재구성. 카드 높이 차이로 생기던 큰 공백을 없애기 위해 상단 섹션을 스택형으로 재배치함. -->
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
@@ -9,135 +10,151 @@
   <body>
     <main class="shell">
       <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">Lotto Insight Studio</p>
-          <h1>로또 번호 분석 생성기</h1>
-          <p class="lede">
-            최신 회차 흐름을 반영해 번호 순위, 추천 5조합, 맞춤 1조합을 빠르게 확인합니다.
-          </p>
-          <div class="hero-metrics">
-            <article class="hero-metric">
-              <span>반영 회차</span>
-              <strong id="hero-latest-round">-</strong>
-              <small>가장 최근 저장 데이터</small>
-            </article>
-            <article class="hero-metric">
-              <span>이번 추천 평균 5등권</span>
-              <strong id="hero-hit3-average">-</strong>
-              <small>추천 5세트 기준</small>
-            </article>
-            <article class="hero-metric">
-              <span>이번 추천 최고 5등권</span>
-              <strong id="hero-hit3-best">-</strong>
-              <small>현재 세트 최고값</small>
-            </article>
+        <div class="hero-main">
+          <div class="hero-copy-stack">
+            <div class="hero-title-panel">
+              <p class="eyebrow">Lotto Insight Studio</p>
+              <h1>로또 번호 분석 생성기</h1>
+            </div>
+            <div class="hero-support-panel">
+              <p class="lede">
+                최신 회차 흐름을 반영해 번호 순위, 추천 5조합, 맞춤 1조합을 빠르게 확인합니다.
+              </p>
+              <div class="hero-actions">
+                <a
+                  class="hero-link"
+                  href="https://ol.dhlottery.co.kr/olotto/game_mobile/game645.do"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  동행복권 웹구매 바로가기
+                </a>
+              </div>
+            </div>
           </div>
-          <div class="hero-badges">
-            <span>자동 동기화</span>
-            <span>백테스트 기반</span>
-            <span>맞춤 1조합 생성</span>
-          </div>
-          <div class="hero-actions">
-            <a
-              class="hero-link"
-              href="https://ol.dhlottery.co.kr/olotto/game_mobile/game645.do"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              동행복권 웹구매 바로가기
-            </a>
+          <div class="hero-side">
+            <div class="hero-stats">
+              <article class="hero-stat-card">
+                <span>반영 회차</span>
+                <strong id="hero-latest-round">-</strong>
+                <small>가장 최근 저장 데이터</small>
+              </article>
+              <article class="hero-stat-card">
+                <span>평균 5등권</span>
+                <strong id="hero-hit3-average">-</strong>
+                <small>추천 5세트 기준</small>
+              </article>
+              <article class="hero-stat-card">
+                <span>최고 5등권</span>
+                <strong id="hero-hit3-best">-</strong>
+                <small>현재 세트 최고값</small>
+              </article>
+            </div>
           </div>
         </div>
-        <aside class="hero-note">
-          <strong>빠른 안내</strong>
-          <p>
-            당첨 보장 도구는 아니고, 실제 회차 패턴과 최근성 점수를 참고해 조합을 압축해서 보여주는 분석 화면입니다.
-          </p>
-        </aside>
       </section>
 
-      <section class="panel sync-panel">
-        <div class="panel-head">
-          <div>
-            <h2>자동 데이터 동기화</h2>
-            <p id="sync-caption">최신 회차 확인 중입니다.</p>
+      <section class="top-stage">
+        <section class="panel sync-panel top-stage-card">
+          <div class="panel-head">
+            <div>
+              <h2>자동 데이터 동기화</h2>
+              <p id="sync-caption">최신 회차 확인 중입니다.</p>
+            </div>
+            <div class="sync-actions">
+              <button id="sync-button" type="button">1. 최신 회차 가져오기</button>
+              <button id="refresh-button" type="button" class="ghost">2. 분석 시작</button>
+            </div>
           </div>
-          <div class="sync-actions">
-            <button id="sync-button" type="button">1. 최신 회차 가져오기</button>
-            <button id="refresh-button" type="button" class="ghost">2. 분석 시작</button>
+          <p id="flow-guide" class="flow-guide">먼저 최신 회차를 가져온 뒤, 계산하기와 남은 계산 마무리를 순서대로 진행하세요.</p>
+          <div class="sync-facts">
+            <div class="sync-fact">
+              <span>최신 회차</span>
+              <strong id="latest-round-label">-</strong>
+            </div>
+            <div class="sync-fact">
+              <span>추첨일</span>
+              <strong id="latest-date-label">-</strong>
+            </div>
           </div>
-        </div>
-        <p id="flow-guide" class="flow-guide">먼저 최신 회차를 가져온 뒤, 계산하기와 남은 계산 마무리를 순서대로 진행하세요.</p>
-        <div class="sync-facts">
-          <div class="sync-fact">
-            <span>최신 회차</span>
-            <strong id="latest-round-label">-</strong>
+          <div class="sync-summary">
+            <div class="sync-chip">
+              <span>진행 순서</span>
+              <strong>동기화 → 분석</strong>
+            </div>
+            <div class="sync-chip">
+              <span>권장 상태</span>
+              <strong>최신 회차 먼저 반영</strong>
+            </div>
           </div>
-          <div class="sync-fact">
-            <span>추첨일</span>
-            <strong id="latest-date-label">-</strong>
+          <div id="loading-panel" class="loading-panel">
+            <div class="loading-meta">
+              <strong id="loading-title">서버 준비 중</strong>
+              <span id="loading-step">첫 응답을 기다리는 중입니다.</span>
+            </div>
+            <div class="loading-track" aria-hidden="true">
+              <div id="loading-bar" class="loading-bar"></div>
+            </div>
           </div>
-        </div>
-        <div id="loading-panel" class="loading-panel">
-          <div class="loading-meta">
-            <strong id="loading-title">서버 준비 중</strong>
-            <span id="loading-step">첫 응답을 기다리는 중입니다.</span>
-          </div>
-          <div class="loading-track" aria-hidden="true">
-            <div id="loading-bar" class="loading-bar"></div>
-          </div>
-        </div>
-        <p id="status-message" class="status-message"></p>
-      </section>
+          <p id="status-message" class="status-message"></p>
+        </section>
 
-      <section class="panel target-panel">
-        <div class="panel-head">
-          <div>
-            <h2>맞춤 1조합 생성</h2>
-            <p id="target-caption">목표 5등권 확률 범위 안에서 맞춤 조합을 만듭니다.</p>
+        <section class="panel target-panel top-stage-card">
+          <div class="panel-head">
+            <div>
+              <h2>맞춤 1조합 생성</h2>
+              <p id="target-caption">목표 5등권 확률 범위 안에서 맞춤 조합을 만듭니다.</p>
+            </div>
+            <button id="target-generate-button" type="button">맞춤 1조합 만들기</button>
           </div>
-          <button id="target-generate-button" type="button">맞춤 1조합 만들기</button>
-        </div>
-        <div class="target-controls">
-          <label class="target-range-label">
-            <span>5등권 목표 확률</span>
-            <input id="target-hit3-range" type="range" min="1" max="7" step="0.1" value="3.5" />
-          </label>
-          <label class="target-input-label">
-            <span>직접 입력 (%)</span>
-            <input id="target-hit3-input" type="number" min="1" max="7" step="0.1" value="3.5" />
-          </label>
-          <label class="target-input-label">
-            <span>고정 번호 1개</span>
-            <select id="target-fixed-number">
-              <option value="">자동 선택</option>
-            </select>
-          </label>
-          <label class="target-input-label">
-            <span>제외 번호 1개</span>
-            <select id="target-excluded-number">
-              <option value="">자동 선택</option>
-            </select>
-          </label>
-        </div>
-        <p id="target-help" class="target-help">허용 범위 안에서만 설정할 수 있습니다.</p>
-        <div id="custom-recommendation" class="custom-recommendation"></div>
-      </section>
+          <div class="target-controls">
+            <label class="target-range-label">
+              <span>5등권 목표 확률</span>
+              <input id="target-hit3-range" type="range" min="1" max="7" step="0.1" value="3.5" />
+            </label>
+            <label class="target-input-label">
+              <span>직접 입력 (%)</span>
+              <input id="target-hit3-input" type="number" min="1" max="7" step="0.1" value="3.5" />
+            </label>
+            <label class="target-input-label">
+              <span>고정 번호 1개</span>
+              <select id="target-fixed-number">
+                <option value="">자동 선택</option>
+              </select>
+            </label>
+            <label class="target-input-label">
+              <span>제외 번호 1개</span>
+              <select id="target-excluded-number">
+                <option value="">자동 선택</option>
+              </select>
+            </label>
+          </div>
+          <p id="target-help" class="target-help">허용 범위 안에서만 설정할 수 있습니다.</p>
+        </section>
 
-      <section class="panel quick-picks-panel">
-        <div class="panel-head">
-          <h2>빠른 추천 5조합</h2>
-          <p>설명 없이 바로 보고 싶은 경우를 위한 상단 요약입니다.</p>
-        </div>
-        <div id="quick-picks" class="quick-picks"></div>
-      </section>
+        <section class="panel quick-picks-panel top-stage-card">
+          <div class="panel-head">
+            <h2>빠른 추천 5조합</h2>
+            <p>설명 없이 바로 보고 싶은 경우를 위한 상단 요약입니다.</p>
+          </div>
+          <div id="quick-picks" class="quick-picks"></div>
+        </section>
 
-      <section class="panel ranking-panel">
-        <div class="panel-head">
-          <h2>이번 회차 가능성 번호 순위</h2>
-          <p>최근성, 백테스트, 출현 흐름을 합친 모델 순위입니다.</p>
-        </div>
-        <div id="number-ranking" class="number-ranking"></div>
+        <section class="panel custom-panel top-stage-card">
+          <div class="panel-head compact">
+            <h2>맞춤 결과</h2>
+            <p>설정값에 맞춰 생성된 현재 1조합입니다.</p>
+          </div>
+          <div id="custom-recommendation" class="custom-recommendation"></div>
+        </section>
+
+        <section class="panel ranking-panel top-stage-card">
+          <div class="panel-head">
+            <h2>이번 회차 가능성 번호 순위</h2>
+            <p>최근성, 백테스트, 출현 흐름을 합친 모델 순위입니다.</p>
+          </div>
+          <div id="number-ranking" class="number-ranking"></div>
+        </section>
       </section>
 
       <section class="top-grid">

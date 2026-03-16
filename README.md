@@ -31,6 +31,12 @@ npm run start:safe
 npm run stop:port
 ```
 
+수정 후 서버 상태를 확인하고, 필요하면 다시 띄운 뒤 브라우저까지 여는 미리보기 흐름은 아래 명령 하나로 처리할 수 있습니다.
+
+```bash
+npm run preview
+```
+
 임시 로그와 브라우저 캐시를 정리하려면 아래 명령을 사용합니다.
 
 ```bash
@@ -38,6 +44,8 @@ npm run cleanup:temp
 ```
 
 환경 변수는 `.env.example`을 참고해 `.env.local`로 분리해서 관리하는 것을 권장합니다.
+
+화면 수정과 미리보기 진행 방식은 [docs/preview-workflow.md](C:\Users\KGWPC\workspace\lotto\docs\preview-workflow.md)에 정리돼 있습니다.
 
 ## Render 배포
 

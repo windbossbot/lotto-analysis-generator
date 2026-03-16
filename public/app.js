@@ -124,12 +124,16 @@ function formatSyncLabel(sync) {
 }
 
 function renderSyncFacts() {
-  latestRoundLabelEl.textContent = state.latestMeta?.latestRound ? `${state.latestMeta.latestRound}회` : "-";
-  latestDateLabelEl.textContent = state.latestMeta?.latestDrawDate || "-";
+  const latestRound = state.latestMeta?.latestRound || state.analysis?.latestRound || state.draws[0]?.round || null;
+  const latestDrawDate = state.latestMeta?.latestDrawDate || state.analysis?.latestDrawDate || state.draws[0]?.drawDate || null;
+
+  latestRoundLabelEl.textContent = latestRound ? `${latestRound}회` : "-";
+  latestDateLabelEl.textContent = latestDrawDate || "-";
 }
 
 function renderHeroMetrics() {
-  const latestRound = state.latestMeta?.latestRound ? `${state.latestMeta.latestRound}회` : "-";
+  const latestRoundValue = state.latestMeta?.latestRound || state.analysis?.latestRound || state.draws[0]?.round || null;
+  const latestRound = latestRoundValue ? `${latestRoundValue}회` : "-";
   const hit3Rates = state.recommendations.map((item) => Number(item.historicalFit?.hit3Rate || 0));
   const averageHit3Rate = hit3Rates.length
     ? `${(hit3Rates.reduce((total, value) => total + value, 0) / hit3Rates.length).toFixed(2)}%`
