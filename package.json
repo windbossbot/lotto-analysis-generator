@@ -9,6 +9,9 @@
   },
   "scripts": {
     "start": "node server.js",
+    "start:safe": "node scripts/run-local.js",
+    "stop:port": "node scripts/kill-port.js 3210",
+    "cleanup:temp": "node scripts/cleanup-temp.js",
     "dev": "node --watch server.js"
   },
   "dependencies": {

@@ -15,6 +15,23 @@
           <p class="lede">
             최신 회차 흐름을 반영해 번호 순위, 추천 5조합, 맞춤 1조합을 빠르게 확인합니다.
           </p>
+          <div class="hero-metrics">
+            <article class="hero-metric">
+              <span>반영 회차</span>
+              <strong id="hero-latest-round">-</strong>
+              <small>가장 최근 저장 데이터</small>
+            </article>
+            <article class="hero-metric">
+              <span>이번 추천 평균 5등권</span>
+              <strong id="hero-hit3-average">-</strong>
+              <small>추천 5세트 기준</small>
+            </article>
+            <article class="hero-metric">
+              <span>이번 추천 최고 5등권</span>
+              <strong id="hero-hit3-best">-</strong>
+              <small>현재 세트 최고값</small>
+            </article>
+          </div>
           <div class="hero-badges">
             <span>자동 동기화</span>
             <span>백테스트 기반</span>
@@ -93,6 +110,12 @@
           <label class="target-input-label">
             <span>고정 번호 1개</span>
             <select id="target-fixed-number">
+              <option value="">자동 선택</option>
+            </select>
+          </label>
+          <label class="target-input-label">
+            <span>제외 번호 1개</span>
+            <select id="target-excluded-number">
               <option value="">자동 선택</option>
             </select>
           </label>

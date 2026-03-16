@@ -79,6 +79,18 @@ p {
 
 .panel {
   padding: 24px;
+  position: relative;
+  overflow: hidden;
+}
+
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(214, 163, 55, 0.42), rgba(255, 255, 255, 0));
+  pointer-events: none;
 }
 
 .hero-copy {
@@ -138,6 +150,35 @@ h1 {
 
 .hero-actions {
   margin-top: 14px;
+}
+
+.hero-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0 14px;
+}
+
+.hero-metric {
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 248, 240, 0.72)),
+    rgba(255, 255, 255, 0.6);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.hero-metric span,
+.hero-metric small {
+  color: var(--muted);
+}
+
+.hero-metric strong {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 1.7rem;
+  letter-spacing: -0.03em;
 }
 
 .hero-link {
@@ -352,6 +393,7 @@ h1 {
 
 .quick-pick-card {
   padding: 14px;
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
 }
 
 .number-ranking {
@@ -387,6 +429,17 @@ h1 {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+.quick-pick-card:hover,
+.recommendation-card:hover,
+.ranking-card:hover,
+.summary-card:hover,
+.trend-card:hover,
+.draw-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 34px rgba(63, 38, 18, 0.1);
 }
 
 .summary-card {
@@ -625,6 +678,12 @@ h1 {
   padding: 18px;
 }
 
+.recommendation-card {
+  background:
+    radial-gradient(circle at top right, rgba(214, 163, 55, 0.12), transparent 22%),
+    var(--card);
+}
+
 .recommendation-head {
   margin-bottom: 14px;
 }
@@ -657,6 +716,10 @@ h1 {
   border-radius: 16px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.68);
+}
+
+.score-chip:first-child {
+  background: linear-gradient(180deg, rgba(255, 243, 207, 0.95), rgba(255, 255, 255, 0.8));
 }
 
 .score-chip span,
@@ -768,6 +831,10 @@ button.danger {
   .hero,
   .top-grid,
   .dashboard {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-metrics {
     grid-template-columns: 1fr;
   }
 

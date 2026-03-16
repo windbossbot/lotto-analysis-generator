@@ -25,6 +25,9 @@ const TARGET_HIT3_RATE_MIN = 1;
 const TARGET_HIT3_RATE_MAX = 7;
 const TARGET_HIT3_RATE_STEP = 0.1;
 const CORE_RECALC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+const WEIGHT_FLATTEN_EXPONENT = 0.84;
+const REUSE_PENALTY_PER_PICK = 18;
+const MAX_NUMBER_USAGE_PER_BATCH = 3;
 let drawsMemoryCache = null;
 let syncInFlight = null;
 let appCacheMemory = null;
@@ -645,7 +648,12 @@ function clampTargetHit3Rate(value) {
   return Math.min(TARGET_HIT3_RATE_MAX, Math.max(TARGET_HIT3_RATE_MIN, numeric));
 }
 
-function normalizeFixedNumber(value) {
+/**
+ * Normalize one selectable lotto number from user input.
+ * @param {number|string|null|undefined} value Requested number.
+ * @returns {number|null} Normalized lotto number or null.
+ */
+function normalizeSelectableNumber(value) {
   if (value === null || value === undefined || value === "") {
     return null;
   }
@@ -656,6 +664,43 @@ function normalizeFixedNumber(value) {
   }
 
   return numeric;
+}
+
+function normalizeFixedNumber(value) {
+  return normalizeSelectableNumber(value);
+}
+
+function normalizeExcludedNumber(value) {
+  return normalizeSelectableNumber(value);
+}
+
+/**
+ * Validate include and exclude number constraints.
+ * @param {number|string|null|undefined} fixedNumber Required number.
+ * @param {number|string|null|undefined} excludedNumber Blocked number.
+ * @returns {{ fixedNumber: number|null, excludedNumber: number|null, error: string|null }}
+ */
+function resolveNumberConstraints(fixedNumber, excludedNumber) {
+  const normalizedFixedNumber = normalizeFixedNumber(fixedNumber);
+  const normalizedExcludedNumber = normalizeExcludedNumber(excludedNumber);
+
+  if (
+    normalizedFixedNumber !== null &&
+    normalizedExcludedNumber !== null &&
+    normalizedFixedNumber === normalizedExcludedNumber
+  ) {
+    return {
+      fixedNumber: normalizedFixedNumber,
+      excludedNumber: normalizedExcludedNumber,
+      error: "포함 번호와 제외 번호는 같을 수 없습니다."
+    };
+  }
+
+  return {
+    fixedNumber: normalizedFixedNumber,
+    excludedNumber: normalizedExcludedNumber,
+    error: null
+  };
 }
 
 function pickWeighted(pool, blockedNumbers) {
@@ -686,12 +731,46 @@ function uniqueKey(numbers) {
   return sortNumbers(numbers).join("-");
 }
 
-function generateRecommendationSet(pool, existingKeys, seededNumbers = []) {
+/**
+ * Build a deterministic fallback set that still respects include/exclude rules.
+ * @param {{ number: number, weight: number }[]} pool Candidate pool.
+ * @param {Set<number>} requiredNumbers Required picks.
+ * @param {Set<number>} blockedNumbers Excluded picks.
+ * @returns {number[]|null} Candidate set.
+ */
+function buildFallbackCandidate(pool, requiredNumbers, blockedNumbers) {
+  const numbers = [...requiredNumbers];
+  const ordered = [...pool]
+    .filter((item) => !requiredNumbers.has(item.number) && !blockedNumbers.has(item.number))
+    .sort((a, b) => b.weight - a.weight || a.number - b.number);
+
+  for (const item of ordered) {
+    if (numbers.length === PICKS_PER_DRAW) {
+      break;
+    }
+    numbers.push(item.number);
+  }
+
+  if (numbers.length !== PICKS_PER_DRAW) {
+    return null;
+  }
+
+  return sortNumbers(numbers);
+}
+
+function generateRecommendationSet(pool, existingKeys, options = {}) {
+  const requiredNumbers = new Set(options.requiredNumbers || []);
+  const blockedNumbers = new Set(options.blockedNumbers || []);
+
+  if ([...requiredNumbers].some((number) => blockedNumbers.has(number))) {
+    return null;
+  }
+
   for (let attempt = 0; attempt < 300; attempt += 1) {
-    const picked = new Set(seededNumbers);
+    const picked = new Set(requiredNumbers);
 
     while (picked.size < PICKS_PER_DRAW) {
-      const next = pickWeighted(pool, picked);
+      const next = pickWeighted(pool, new Set([...picked, ...blockedNumbers]));
       if (next === null) {
         break;
       }
@@ -705,7 +784,7 @@ function generateRecommendationSet(pool, existingKeys, seededNumbers = []) {
     const numbers = sortNumbers([...picked]);
     const key = uniqueKey(numbers);
 
-    if (existingKeys.has(key) || !isBalancedSet(numbers)) {
+    if (existingKeys.has(key) || numbers.some((number) => blockedNumbers.has(number)) || !isBalancedSet(numbers)) {
       continue;
     }
 
@@ -713,20 +792,24 @@ function generateRecommendationSet(pool, existingKeys, seededNumbers = []) {
     return numbers;
   }
 
-  return sortNumbers(
-    Array.from({ length: LOTTO_MAX }, (_, index) => index + 1)
-      .sort(() => Math.random() - 0.5)
-      .slice(0, PICKS_PER_DRAW)
-  );
+  const fallback = buildFallbackCandidate(pool, requiredNumbers, blockedNumbers);
+  if (!fallback || existingKeys.has(uniqueKey(fallback)) || !isBalancedSet(fallback)) {
+    return null;
+  }
+
+  existingKeys.add(uniqueKey(fallback));
+  return fallback;
 }
 
-function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existingKeys, fixedNumber = null) {
+function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existingKeys, options = {}) {
   const orderedNumbers = [...scoreMap.values()].sort((a, b) => b.score - a.score || a.number - b.number);
-  const seeded = new Set(fixedNumber ? [fixedNumber] : []);
+  const requiredNumbers = new Set(options.requiredNumbers || []);
+  const blockedNumbers = new Set(options.blockedNumbers || []);
+  const seeded = new Set(requiredNumbers);
 
   if (mode === "top-score") {
     orderedNumbers.slice(0, 9).forEach((item) => {
-      if (seeded.size < 3) {
+      if (!blockedNumbers.has(item.number) && seeded.size < 3) {
         seeded.add(item.number);
       }
     });
@@ -737,7 +820,7 @@ function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existi
       .sort((a, b) => (b.hitRate + b.pickRate * 0.4) - (a.hitRate + a.pickRate * 0.4) || a.number - b.number)
       .slice(0, 10)
       .forEach((item) => {
-        if (seeded.size < 3) {
+        if (!blockedNumbers.has(item.number) && seeded.size < 3) {
           seeded.add(item.number);
         }
       });
@@ -745,12 +828,12 @@ function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existi
 
   if (mode === "hot-cold-mix") {
     orderedNumbers.slice(0, 5).forEach((item) => {
-      if (seeded.size < 2) {
+      if (!blockedNumbers.has(item.number) && seeded.size < 2) {
         seeded.add(item.number);
       }
     });
     orderedNumbers.slice(-8).forEach((item) => {
-      if (seeded.size < 3) {
+      if (!blockedNumbers.has(item.number) && seeded.size < 3) {
         seeded.add(item.number);
       }
     });
@@ -762,7 +845,11 @@ function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existi
       ?.split("-")
       .map(Number);
 
-    (topPair || []).forEach((number) => seeded.add(number));
+    (topPair || []).forEach((number) => {
+      if (!blockedNumbers.has(number)) {
+        seeded.add(number);
+      }
+    });
   }
 
   const pool = orderedNumbers.map((item) => {
@@ -774,7 +861,7 @@ function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existi
   });
 
   while (seeded.size < PICKS_PER_DRAW) {
-    const next = pickWeighted(pool, seeded);
+    const next = pickWeighted(pool, new Set([...seeded, ...blockedNumbers]));
     if (next === null) {
       break;
     }
@@ -782,7 +869,7 @@ function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existi
   }
 
   const numbers = sortNumbers([...seeded]);
-  if (numbers.length !== PICKS_PER_DRAW) {
+  if (numbers.length !== PICKS_PER_DRAW || numbers.some((number) => blockedNumbers.has(number))) {
     return null;
   }
 
@@ -794,8 +881,47 @@ function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existi
   return numbers;
 }
 
+/**
+ * Build reusable number-scoring context once per recommendation request.
+ * @param {Array<{ round: number, drawDate: string, numbers: number[] }>} draws Lotto draws.
+ * @returns {{
+ *   analysis: ReturnType<typeof buildAnalysis>,
+ *   scoreMap: Map<number, { number: number, score: number }>,
+ *   backtestMap: Map<number, { number: number, hitRate: number, pickRate: number }>,
+ *   pairScores: Map<string, number>,
+ *   weightedPool: { number: number, weight: number }[],
+ *   topRankSet: Set<number>,
+ *   carrySet: Set<number>,
+ *   coldSet: Set<number>
+ * }}
+ */
+function buildRecommendationContext(draws) {
+  const analysis = buildAnalysis(draws);
+  const scoreMap = new Map(scoreNumbersFromHistory(draws).map((item) => [item.number, item]));
+  const backtestMap = new Map(buildBacktestStats(draws).map((item) => [item.number, item]));
+  const pairScores = buildWeightedProfile(draws).pairScores;
+  const weightedPool = [...scoreMap.values()].map((item) => {
+    const rawWeight = 1 + item.score + ((backtestMap.get(item.number)?.hitRate || 0) * 30);
+    return {
+      number: item.number,
+      weight: Math.max(1, Number(Math.pow(rawWeight, WEIGHT_FLATTEN_EXPONENT).toFixed(4)))
+    };
+  });
+
+  return {
+    analysis,
+    scoreMap,
+    backtestMap,
+    pairScores,
+    weightedPool,
+    topRankSet: new Set([...scoreMap.values()].sort((a, b) => b.score - a.score).slice(0, 10).map((item) => item.number)),
+    carrySet: new Set(analysis.patternSummary.carryOverNumbers || []),
+    coldSet: new Set(analysis.coldNumbers.map((item) => item.number))
+  };
+}
+
 function scoreCandidate(numbers, context) {
-  const { scoreMap, backtestMap, pairScores, analysis } = context;
+  const { scoreMap, backtestMap, pairScores, analysis, topRankSet, carrySet, coldSet } = context;
   const sorted = sortNumbers(numbers);
   const sum = sorted.reduce((total, value) => total + value, 0);
   const odd = sorted.filter((number) => number % 2 === 1).length;
@@ -805,6 +931,9 @@ function scoreCandidate(numbers, context) {
   const maxGap = Math.max(...sorted.slice(1).map((number, index) => number - sorted[index]));
   const sections = new Set(sorted.map((number) => Math.floor((number - 1) / 10))).size;
   const acValue = calculateAcValue(sorted);
+  const topRankCount = sorted.filter((number) => topRankSet.has(number)).length;
+  const carryCount = sorted.filter((number) => carrySet.has(number)).length;
+  const coldCount = sorted.filter((number) => coldSet.has(number)).length;
 
   let numberScore = 0;
   let backtestScore = 0;
@@ -830,7 +959,10 @@ function scoreCandidate(numbers, context) {
   patternScore -= maxGap >= 18 ? 10 : 0;
   patternScore -= Math.abs(acValue - Math.round(analysis.patternSummary.averageAc || 7)) * 7;
   patternScore -= endDigitSet.size <= 3 ? 18 : 0;
+  patternScore -= Math.max(0, topRankCount - 3) * 10;
+  patternScore -= Math.max(0, carryCount - 2) * 8;
   patternScore += endDigitSet.size >= 5 ? 8 : 0;
+  patternScore += coldCount >= 1 && coldCount <= 2 ? 5 : 0;
   patternScore += sections >= 4 ? 10 : sections >= 3 ? 4 : -14;
   if (sorted.join(",") === "1,2,3,4,5,6") {
     patternScore -= 120;
@@ -861,20 +993,41 @@ function scoreCandidate(numbers, context) {
 
 function pickDiversifiedRecommendations(candidates) {
   const selected = [];
+  const remaining = [...candidates];
+  const usageMap = new Map();
 
-  for (const candidate of candidates) {
-    const tooSimilar = selected.some((picked) => {
-      const overlap = candidate.numbers.filter((number) => picked.numbers.includes(number)).length;
-      return overlap >= 4;
+  while (remaining.length > 0 && selected.length < RECOMMENDATION_COUNT) {
+    let bestIndex = 0;
+    let bestAdjustedScore = -Infinity;
+
+    remaining.forEach((candidate, index) => {
+      const overusedCount = candidate.numbers.filter((number) => (usageMap.get(number) || 0) >= MAX_NUMBER_USAGE_PER_BATCH).length;
+      const overlapPenalty = selected.reduce((penalty, picked) => {
+        const overlap = candidate.numbers.filter((number) => picked.numbers.includes(number)).length;
+        return penalty + (overlap >= 4 ? 85 : overlap * 9);
+      }, 0);
+      const reusePenalty = candidate.numbers.reduce(
+        (penalty, number) => penalty + ((usageMap.get(number) || 0) * REUSE_PENALTY_PER_PICK),
+        0
+      );
+      const adjustedScore =
+        candidate.score +
+        (candidate.historicalFit.hit3Rate * 4.5) -
+        overlapPenalty -
+        reusePenalty -
+        (overusedCount * 120);
+
+      if (adjustedScore > bestAdjustedScore) {
+        bestAdjustedScore = adjustedScore;
+        bestIndex = index;
+      }
     });
 
-    if (!tooSimilar || selected.length >= 4) {
-      selected.push(candidate);
-    }
-
-    if (selected.length === RECOMMENDATION_COUNT) {
-      break;
-    }
+    const [chosen] = remaining.splice(bestIndex, 1);
+    selected.push(chosen);
+    chosen.numbers.forEach((number) => {
+      usageMap.set(number, (usageMap.get(number) || 0) + 1);
+    });
   }
 
   return selected;
@@ -930,35 +1083,47 @@ function labelRecommendation(numbers, analysis) {
 
 function buildRecommendationCandidates(draws, options = {}) {
   const candidatePoolSize = options.candidatePoolSize || LIVE_CANDIDATE_POOL_SIZE;
-  const fixedNumber = normalizeFixedNumber(options.fixedNumber);
-  const analysis = buildAnalysis(draws);
-  const scoreMap = new Map(scoreNumbersFromHistory(draws).map((item) => [item.number, item]));
-  const backtestStats = buildBacktestStats(draws);
-  const backtestMap = new Map(backtestStats.map((item) => [item.number, item]));
-  const pairScores = buildWeightedProfile(draws).pairScores;
-  const weightedPool = [...scoreMap.values()].map((item) => ({
-    number: item.number,
-    weight: 1 + item.score + ((backtestMap.get(item.number)?.hitRate || 0) * 30)
-  }));
+  const constraints = resolveNumberConstraints(options.fixedNumber, options.excludedNumber);
+  if (constraints.error) {
+    return [];
+  }
+
+  const fixedNumber = constraints.fixedNumber;
+  const excludedNumber = constraints.excludedNumber;
+  const recommendationContext = options.context || buildRecommendationContext(draws);
+  const { analysis, scoreMap, backtestMap, pairScores, weightedPool } = recommendationContext;
   const candidateKeys = new Set();
   const modes = ["top-score", "backtest-heavy", "hot-cold-mix", "pair-anchored", "balanced"];
   const candidates = [];
+  const requiredNumbers = fixedNumber ? [fixedNumber] : [];
+  const blockedNumbers = excludedNumber ? [excludedNumber] : [];
 
   for (let index = 0; index < candidatePoolSize; index += 1) {
     const mode = modes[index % modes.length];
     let numbers = null;
 
     if (mode === "balanced") {
-      numbers = generateRecommendationSet(weightedPool, candidateKeys, fixedNumber ? [fixedNumber] : []);
+      numbers = generateRecommendationSet(weightedPool, candidateKeys, {
+        requiredNumbers,
+        blockedNumbers
+      });
     } else {
-      numbers = generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, candidateKeys, fixedNumber);
+      numbers = generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, candidateKeys, {
+        requiredNumbers,
+        blockedNumbers
+      });
     }
 
-    if (!numbers || (fixedNumber && !numbers.includes(fixedNumber)) || !isBalancedSet(numbers)) {
+    if (
+      !numbers ||
+      (fixedNumber && !numbers.includes(fixedNumber)) ||
+      (excludedNumber && numbers.includes(excludedNumber)) ||
+      !isBalancedSet(numbers)
+    ) {
       continue;
     }
 
-    const scored = scoreCandidate(numbers, { scoreMap, backtestMap, pairScores, analysis });
+    const scored = scoreCandidate(numbers, recommendationContext);
     candidates.push({
       numbers,
       score: scored.totalScore,
@@ -980,10 +1145,10 @@ function buildRecommendationCandidates(draws, options = {}) {
 }
 
 function buildRecommendations(draws, count = RECOMMENDATION_COUNT, options = {}) {
-  const candidates = buildRecommendationCandidates(draws, options);
+  const recommendationContext = options.context || buildRecommendationContext(draws);
+  const candidates = buildRecommendationCandidates(draws, { ...options, context: recommendationContext });
   const selected = pickDiversifiedRecommendations(candidates).slice(0, count);
-  const scoreMap = new Map(scoreNumbersFromHistory(draws).map((item) => [item.number, item]));
-  const backtestMap = new Map(buildBacktestStats(draws).map((item) => [item.number, item]));
+  const { scoreMap, backtestMap } = recommendationContext;
 
   const minScore = Math.min(...selected.map((item) => item.score), 0);
   const maxScore = Math.max(...selected.map((item) => item.score), 1);
@@ -1023,17 +1188,24 @@ function buildRecommendations(draws, count = RECOMMENDATION_COUNT, options = {})
   }));
 }
 
-function buildCustomRecommendation(draws, targetHit3Rate, fixedNumber = null) {
+function buildCustomRecommendation(draws, targetHit3Rate, fixedNumber = null, excludedNumber = null, recommendationContext = null) {
   const clampedTarget = clampTargetHit3Rate(targetHit3Rate);
   if (clampedTarget === null) {
     return null;
   }
 
-  const normalizedFixedNumber = normalizeFixedNumber(fixedNumber);
+  const constraints = resolveNumberConstraints(fixedNumber, excludedNumber);
+  if (constraints.error) {
+    return { error: constraints.error };
+  }
+
+  const activeContext = recommendationContext || buildRecommendationContext(draws);
 
   const candidates = buildRecommendationCandidates(draws, {
     candidatePoolSize: LIVE_CANDIDATE_POOL_SIZE * 2,
-    fixedNumber: normalizedFixedNumber
+    fixedNumber: constraints.fixedNumber,
+    excludedNumber: constraints.excludedNumber,
+    context: activeContext
   }).sort((a, b) => {
     const aDistance = Math.abs(a.historicalFit.hit3Rate - clampedTarget);
     const bDistance = Math.abs(b.historicalFit.hit3Rate - clampedTarget);
@@ -1047,11 +1219,14 @@ function buildCustomRecommendation(draws, targetHit3Rate, fixedNumber = null) {
 
   return {
     id: 1,
-    label: normalizedFixedNumber
-      ? `${clampedTarget.toFixed(1)}% 목표 · ${normalizedFixedNumber}번 고정`
-      : `${clampedTarget.toFixed(1)}% 목표 맞춤형`,
+    label: [
+      `${clampedTarget.toFixed(1)}% 목표`,
+      constraints.fixedNumber ? `${constraints.fixedNumber}번 포함` : null,
+      constraints.excludedNumber ? `${constraints.excludedNumber}번 제외` : null
+    ].filter(Boolean).join(" · "),
     targetHit3Rate: clampedTarget,
-    fixedNumber: normalizedFixedNumber,
+    fixedNumber: constraints.fixedNumber,
+    excludedNumber: constraints.excludedNumber,
     numbers: best.numbers,
     score: best.score,
     sum: best.profile.sum,
@@ -1193,9 +1368,12 @@ function buildBacktestSnapshot(draws) {
 
 function buildCorePayload(draws) {
   const snapshot = buildCoreSnapshot(draws);
-  const recommendations = buildRecommendations(draws, RECOMMENDATION_COUNT);
+  const recommendationContext = buildRecommendationContext(draws);
+  const recommendations = buildRecommendations(draws, RECOMMENDATION_COUNT, {
+    context: recommendationContext
+  });
   const targetRange = buildTargetRange(recommendations);
-  const customRecommendation = buildCustomRecommendation(draws, targetRange.defaultHit3Rate);
+  const customRecommendation = buildCustomRecommendation(draws, targetRange.defaultHit3Rate, null, null, recommendationContext);
 
   return {
     analysis: snapshot.analysis,
@@ -1435,11 +1613,17 @@ app.post("/api/lotto/custom-recommendation", async (req, res) => {
     const customRecommendation = buildCustomRecommendation(
       draws,
       req.body?.targetHit3Rate,
-      req.body?.fixedNumber
+      req.body?.fixedNumber,
+      req.body?.excludedNumber
     );
 
     if (!customRecommendation) {
       res.status(400).json({ error: "목표 5등권 확률 값을 확인해 주세요." });
+      return;
+    }
+
+    if (customRecommendation.error) {
+      res.status(400).json({ error: customRecommendation.error });
       return;
     }
 
@@ -1489,6 +1673,11 @@ app.post("/api/lotto/sync", async (_req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message || "최신 데이터를 동기화하지 못했습니다." });
   }
+});
+
+app.get("/health", (_req, res) => {
+  ensureStorage();
+  res.json({ ok: true });
 });
 
 app.listen(port, "0.0.0.0", () => {

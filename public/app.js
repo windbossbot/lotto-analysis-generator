@@ -30,10 +30,14 @@ const targetGenerateButtonEl = document.getElementById("target-generate-button")
 const targetHit3RangeEl = document.getElementById("target-hit3-range");
 const targetHit3InputEl = document.getElementById("target-hit3-input");
 const targetFixedNumberEl = document.getElementById("target-fixed-number");
+const targetExcludedNumberEl = document.getElementById("target-excluded-number");
 const syncButtonEl = document.getElementById("sync-button");
 const refreshButtonEl = document.getElementById("refresh-button");
 const latestRoundLabelEl = document.getElementById("latest-round-label");
 const latestDateLabelEl = document.getElementById("latest-date-label");
+const heroLatestRoundEl = document.getElementById("hero-latest-round");
+const heroHit3AverageEl = document.getElementById("hero-hit3-average");
+const heroHit3BestEl = document.getElementById("hero-hit3-best");
 const flowGuideEl = document.getElementById("flow-guide");
 const avgSumEl = document.getElementById("avg-sum");
 const avgOddEl = document.getElementById("avg-odd");
@@ -122,6 +126,21 @@ function formatSyncLabel(sync) {
 function renderSyncFacts() {
   latestRoundLabelEl.textContent = state.latestMeta?.latestRound ? `${state.latestMeta.latestRound}회` : "-";
   latestDateLabelEl.textContent = state.latestMeta?.latestDrawDate || "-";
+}
+
+function renderHeroMetrics() {
+  const latestRound = state.latestMeta?.latestRound ? `${state.latestMeta.latestRound}회` : "-";
+  const hit3Rates = state.recommendations.map((item) => Number(item.historicalFit?.hit3Rate || 0));
+  const averageHit3Rate = hit3Rates.length
+    ? `${(hit3Rates.reduce((total, value) => total + value, 0) / hit3Rates.length).toFixed(2)}%`
+    : "-";
+  const bestHit3Rate = hit3Rates.length
+    ? `${Math.max(...hit3Rates).toFixed(2)}%`
+    : "-";
+
+  heroLatestRoundEl.textContent = latestRound;
+  heroHit3AverageEl.textContent = averageHit3Rate;
+  heroHit3BestEl.textContent = bestHit3Rate;
 }
 
 function updateCalcButtons() {
@@ -291,12 +310,12 @@ function customRecommendationCard(item) {
           <strong>${item.fixedNumber || "자동"}</strong>
         </div>
         <div class="score-chip">
-          <span>4등권 추정</span>
-          <strong>${item.historicalFit.hit4Rate}%</strong>
+          <span>제외 번호</span>
+          <strong>${item.excludedNumber || "없음"}</strong>
         </div>
         <div class="score-chip">
-          <span>종합 점수</span>
-          <strong>${item.score}</strong>
+          <span>4등권 추정</span>
+          <strong>${item.historicalFit.hit4Rate}%</strong>
         </div>
       </div>
     </article>
@@ -496,16 +515,16 @@ function applyTargetRange() {
   targetCaptionEl.textContent = `허용 범위 ${min}% ~ ${max}% · 현재 추천 평균 5등권 추정치는 ${averageHit3Rate}% 입니다.`;
 }
 
-function populateFixedNumberOptions() {
-  if (targetFixedNumberEl.options.length > 1) {
+function populateNumberOptions(selectElement, suffix) {
+  if (selectElement.options.length > 1) {
     return;
   }
 
   for (let number = 1; number <= 45; number += 1) {
     const option = document.createElement("option");
     option.value = String(number);
-    option.textContent = `${number}번 고정`;
-    targetFixedNumberEl.append(option);
+    option.textContent = `${number}번 ${suffix}`;
+    selectElement.append(option);
   }
 }
 
@@ -527,8 +546,9 @@ function syncTargetInputs(nextValue) {
   const normalized = clamped.toFixed(1);
   targetHit3RangeEl.value = normalized;
   targetHit3InputEl.value = normalized;
-  const fixedLabel = targetFixedNumberEl.value ? `${targetFixedNumberEl.value}번 고정` : "고정 번호 없음";
-  targetHelpEl.textContent = `현재 목표값 ${normalized}% · ${fixedLabel} 기준으로 맞춤 1조합을 생성합니다.`;
+  const fixedLabel = targetFixedNumberEl.value ? `${targetFixedNumberEl.value}번 포함` : "포함 번호 없음";
+  const excludedLabel = targetExcludedNumberEl.value ? `${targetExcludedNumberEl.value}번 제외` : "제외 번호 없음";
+  targetHelpEl.textContent = `현재 목표값 ${normalized}% · ${fixedLabel} · ${excludedLabel} 기준으로 맞춤 1조합을 생성합니다.`;
 }
 
 function renderHistory() {
@@ -568,8 +588,10 @@ function syncApp(payload) {
   state.backtest = payload.backtest || state.backtest;
   syncCaptionEl.textContent = formatSyncLabel(payload.sync);
 
-  populateFixedNumberOptions();
+  populateNumberOptions(targetFixedNumberEl, "포함");
+  populateNumberOptions(targetExcludedNumberEl, "제외");
   renderSyncFacts();
+  renderHeroMetrics();
   updateCalcButtons();
   applyTargetRange();
   renderSummary();
@@ -706,17 +728,27 @@ async function onTargetGenerateClick() {
   targetGenerateButtonEl.disabled = true;
 
   try {
+    if (
+      targetFixedNumberEl.value &&
+      targetExcludedNumberEl.value &&
+      targetFixedNumberEl.value === targetExcludedNumberEl.value
+    ) {
+      throw new Error("포함 번호와 제외 번호는 다르게 선택해 주세요.");
+    }
+
     const payload = await sendJson("/api/lotto/custom-recommendation", {
       method: "POST",
       body: JSON.stringify({
         targetHit3Rate: clampTargetValue(targetHit3InputEl.value),
-        fixedNumber: targetFixedNumberEl.value ? Number(targetFixedNumberEl.value) : null
+        fixedNumber: targetFixedNumberEl.value ? Number(targetFixedNumberEl.value) : null,
+        excludedNumber: targetExcludedNumberEl.value ? Number(targetExcludedNumberEl.value) : null
       })
     });
     state.customRecommendation = payload.customRecommendation || null;
     renderCustomRecommendation();
     const fixedLabel = targetFixedNumberEl.value ? ` · ${targetFixedNumberEl.value}번 포함` : "";
-    targetHelpEl.textContent = `목표 ${targetHit3InputEl.value}%${fixedLabel} 기준 맞춤 조합을 생성했습니다.`;
+    const excludedLabel = targetExcludedNumberEl.value ? ` · ${targetExcludedNumberEl.value}번 제외` : "";
+    targetHelpEl.textContent = `목표 ${targetHit3InputEl.value}%${fixedLabel}${excludedLabel} 기준 맞춤 조합을 생성했습니다.`;
   } catch (error) {
     targetHelpEl.textContent = error.message;
   } finally {
@@ -842,6 +874,9 @@ targetHit3InputEl.addEventListener("input", (event) => {
   syncTargetInputs(event.target.value);
 });
 targetFixedNumberEl.addEventListener("change", () => {
+  syncTargetInputs(targetHit3InputEl.value);
+});
+targetExcludedNumberEl.addEventListener("change", () => {
   syncTargetInputs(targetHit3InputEl.value);
 });
 

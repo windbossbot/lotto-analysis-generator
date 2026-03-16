@@ -8,17 +8,36 @@
 - 번호 순위, 핫/콜드 번호, 구간 분포, 동반 출현 페어 분석
 - 추천 5조합 생성
 - 목표 5등권 추정 확률 기반 맞춤 1조합 생성
-- 원하는 번호 1개 고정 후 맞춤 조합 생성
+- 원하는 번호 1개 포함 또는 제외 후 맞춤 조합 생성
+- 추천 세트 간 특정 번호가 과도하게 반복되지 않도록 분산 보정
+- 이번 추천 평균/최고 5등권 추정치 요약 표시
 - 최근 구간 백테스트
 
 ## 로컬 실행
 
 ```bash
+nvm use
 npm install
-npm start
+npm run start:safe
 ```
 
 기본 주소는 `http://localhost:3210` 입니다.
+
+권장 Node 버전은 `22.14.0` 입니다. 저장소의 `.nvmrc`를 사용해 `nvm use`로 맞출 수 있습니다.
+
+실행 전에 기존 3210 포트 점유 프로세스를 정리하려면 아래 명령을 먼저 사용할 수 있습니다.
+
+```bash
+npm run stop:port
+```
+
+임시 로그와 브라우저 캐시를 정리하려면 아래 명령을 사용합니다.
+
+```bash
+npm run cleanup:temp
+```
+
+환경 변수는 `.env.example`을 참고해 `.env.local`로 분리해서 관리하는 것을 권장합니다.
 
 ## Render 배포
 
@@ -29,7 +48,7 @@ npm start
 - Environment: `Node`
 - Build Command: `npm install`
 - Start Command: `npm start`
-- Health Check Path: `/api/lotto`
+- Health Check Path: `/health`
 
 주의:
 
@@ -40,6 +59,9 @@ npm start
 ## 주요 파일
 
 - `server.js`: API, 데이터 동기화, 분석, 추천, 백테스트
+- `scripts/run-local.js`: 포트 정리 후 서버를 안전하게 실행
+- `scripts/kill-port.js`: 개발 중 남은 포트 점유 프로세스를 정리
+- `scripts/cleanup-temp.js`: 임시 로그와 Playwright 캐시를 정리
 - `public/index.html`: 메인 화면
 - `public/app.js`: 클라이언트 로직
 - `public/styles.css`: UI 스타일
