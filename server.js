@@ -24,6 +24,7 @@ const BACKTEST_ROUNDS = 5;
 const TARGET_HIT3_RATE_MIN = 1;
 const TARGET_HIT3_RATE_MAX = 7;
 const TARGET_HIT3_RATE_STEP = 0.1;
+const LUCK_FACTOR_RATIO = 0.1;
 const CORE_RECALC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const WEIGHT_FLATTEN_EXPONENT = 0.84;
 const REUSE_PENALTY_PER_PICK = 18;
@@ -648,6 +649,19 @@ function clampTargetHit3Rate(value) {
   return Math.min(TARGET_HIT3_RATE_MAX, Math.max(TARGET_HIT3_RATE_MIN, numeric));
 }
 
+function normalizeLuckEnabled(value) {
+  return value === true || value === "true" || value === 1 || value === "1";
+}
+
+function createSeededRandom(seed) {
+  let state = (Number(seed) || 1) >>> 0;
+
+  return function seededRandom() {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+}
+
 /**
  * Normalize one selectable lotto number from user input.
  * @param {number|string|null|undefined} value Requested number.
@@ -805,53 +819,6 @@ function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existi
   const orderedNumbers = [...scoreMap.values()].sort((a, b) => b.score - a.score || a.number - b.number);
   const requiredNumbers = new Set(options.requiredNumbers || []);
   const blockedNumbers = new Set(options.blockedNumbers || []);
-  const seeded = new Set(requiredNumbers);
-
-  if (mode === "top-score") {
-    orderedNumbers.slice(0, 9).forEach((item) => {
-      if (!blockedNumbers.has(item.number) && seeded.size < 3) {
-        seeded.add(item.number);
-      }
-    });
-  }
-
-  if (mode === "backtest-heavy") {
-    [...backtestMap.values()]
-      .sort((a, b) => (b.hitRate + b.pickRate * 0.4) - (a.hitRate + a.pickRate * 0.4) || a.number - b.number)
-      .slice(0, 10)
-      .forEach((item) => {
-        if (!blockedNumbers.has(item.number) && seeded.size < 3) {
-          seeded.add(item.number);
-        }
-      });
-  }
-
-  if (mode === "hot-cold-mix") {
-    orderedNumbers.slice(0, 5).forEach((item) => {
-      if (!blockedNumbers.has(item.number) && seeded.size < 2) {
-        seeded.add(item.number);
-      }
-    });
-    orderedNumbers.slice(-8).forEach((item) => {
-      if (!blockedNumbers.has(item.number) && seeded.size < 3) {
-        seeded.add(item.number);
-      }
-    });
-  }
-
-  if (mode === "pair-anchored") {
-    const topPair = [...pairScores.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0]
-      ?.split("-")
-      .map(Number);
-
-    (topPair || []).forEach((number) => {
-      if (!blockedNumbers.has(number)) {
-        seeded.add(number);
-      }
-    });
-  }
-
   const pool = orderedNumbers.map((item) => {
     const backtest = backtestMap.get(item.number);
     return {
@@ -860,25 +827,87 @@ function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existi
     };
   });
 
-  while (seeded.size < PICKS_PER_DRAW) {
-    const next = pickWeighted(pool, new Set([...seeded, ...blockedNumbers]));
-    if (next === null) {
-      break;
+  function seedNumbersForMode() {
+    const seeded = new Set(requiredNumbers);
+
+    if (mode === "top-score") {
+      orderedNumbers.slice(0, 9).forEach((item) => {
+        if (!blockedNumbers.has(item.number) && seeded.size < 3) {
+          seeded.add(item.number);
+        }
+      });
     }
-    seeded.add(next);
+
+    if (mode === "backtest-heavy") {
+      [...backtestMap.values()]
+        .sort((a, b) => (b.hitRate + b.pickRate * 0.4) - (a.hitRate + a.pickRate * 0.4) || a.number - b.number)
+        .slice(0, 10)
+        .forEach((item) => {
+          if (!blockedNumbers.has(item.number) && seeded.size < 3) {
+            seeded.add(item.number);
+          }
+        });
+    }
+
+    if (mode === "hot-cold-mix") {
+      orderedNumbers.slice(0, 5).forEach((item) => {
+        if (!blockedNumbers.has(item.number) && seeded.size < 2) {
+          seeded.add(item.number);
+        }
+      });
+      orderedNumbers.slice(-8).forEach((item) => {
+        if (!blockedNumbers.has(item.number) && seeded.size < 3) {
+          seeded.add(item.number);
+        }
+      });
+    }
+
+    if (mode === "pair-anchored") {
+      const topPair = [...pairScores.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0]
+        ?.split("-")
+        .map(Number);
+
+      (topPair || []).forEach((number) => {
+        if (!blockedNumbers.has(number)) {
+          seeded.add(number);
+        }
+      });
+    }
+
+    return seeded;
   }
 
-  const numbers = sortNumbers([...seeded]);
-  if (numbers.length !== PICKS_PER_DRAW || numbers.some((number) => blockedNumbers.has(number))) {
-    return null;
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    const seeded = seedNumbersForMode();
+
+    while (seeded.size < PICKS_PER_DRAW) {
+      const next = pickWeighted(pool, new Set([...seeded, ...blockedNumbers]));
+      if (next === null) {
+        break;
+      }
+      seeded.add(next);
+    }
+
+    const numbers = sortNumbers([...seeded]);
+    if (
+      numbers.length !== PICKS_PER_DRAW ||
+      numbers.some((number) => blockedNumbers.has(number)) ||
+      !isBalancedSet(numbers)
+    ) {
+      continue;
+    }
+
+    const key = uniqueKey(numbers);
+    if (existingKeys.has(key)) {
+      continue;
+    }
+
+    existingKeys.add(key);
+    return numbers;
   }
 
-  const key = uniqueKey(numbers);
-  if (existingKeys.has(key)) {
-    return null;
-  }
-  existingKeys.add(key);
-  return numbers;
+  return null;
 }
 
 /**
@@ -892,10 +921,13 @@ function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existi
  *   weightedPool: { number: number, weight: number }[],
  *   topRankSet: Set<number>,
  *   carrySet: Set<number>,
- *   coldSet: Set<number>
+ *   coldSet: Set<number>,
+ *   luckEnabled: boolean,
+ *   luckFactor: number,
+ *   random: () => number
  * }}
  */
-function buildRecommendationContext(draws) {
+function buildRecommendationContext(draws, options = {}) {
   const analysis = buildAnalysis(draws);
   const scoreMap = new Map(scoreNumbersFromHistory(draws).map((item) => [item.number, item]));
   const backtestMap = new Map(buildBacktestStats(draws).map((item) => [item.number, item]));
@@ -916,12 +948,15 @@ function buildRecommendationContext(draws) {
     weightedPool,
     topRankSet: new Set([...scoreMap.values()].sort((a, b) => b.score - a.score).slice(0, 10).map((item) => item.number)),
     carrySet: new Set(analysis.patternSummary.carryOverNumbers || []),
-    coldSet: new Set(analysis.coldNumbers.map((item) => item.number))
+    coldSet: new Set(analysis.coldNumbers.map((item) => item.number)),
+    luckEnabled: normalizeLuckEnabled(options.luckEnabled),
+    luckFactor: LUCK_FACTOR_RATIO,
+    random: typeof options.random === "function" ? options.random : Math.random
   };
 }
 
 function scoreCandidate(numbers, context) {
-  const { scoreMap, backtestMap, pairScores, analysis, topRankSet, carrySet, coldSet } = context;
+  const { scoreMap, backtestMap, pairScores, analysis, topRankSet, carrySet, coldSet, luckEnabled, luckFactor, random } = context;
   const sorted = sortNumbers(numbers);
   const sum = sorted.reduce((total, value) => total + value, 0);
   const odd = sorted.filter((number) => number % 2 === 1).length;
@@ -968,7 +1003,11 @@ function scoreCandidate(numbers, context) {
     patternScore -= 120;
   }
 
-  const totalScore = (numberScore * 2.2) + (backtestScore * 1.55) + (pairScore * 5.2) + patternScore;
+  const deterministicScore = (numberScore * 2.2) + (backtestScore * 1.55) + (pairScore * 5.2) + patternScore;
+  const luckScore = luckEnabled
+    ? Number((deterministicScore * luckFactor * Math.max(0, Math.min(1, random()))).toFixed(2))
+    : 0;
+  const totalScore = deterministicScore + luckScore;
 
   return {
     totalScore: Number(totalScore.toFixed(2)),
@@ -976,7 +1015,8 @@ function scoreCandidate(numbers, context) {
       numberScore: Number(numberScore.toFixed(2)),
       backtestScore: Number(backtestScore.toFixed(2)),
       pairScore: Number(pairScore.toFixed(2)),
-      patternScore: Number(patternScore.toFixed(2))
+      patternScore: Number(patternScore.toFixed(2)),
+      luckScore
     },
     profile: {
       sum,
@@ -1000,19 +1040,27 @@ function pickDiversifiedRecommendations(candidates) {
     let bestIndex = 0;
     let bestAdjustedScore = -Infinity;
 
+    // Favor broader coverage across 5 sets so the batch is less concentrated on the same few numbers.
     remaining.forEach((candidate, index) => {
       const overusedCount = candidate.numbers.filter((number) => (usageMap.get(number) || 0) >= MAX_NUMBER_USAGE_PER_BATCH).length;
       const overlapPenalty = selected.reduce((penalty, picked) => {
         const overlap = candidate.numbers.filter((number) => picked.numbers.includes(number)).length;
-        return penalty + (overlap >= 4 ? 85 : overlap * 9);
+        return penalty + (overlap >= 4 ? 110 : overlap >= 3 ? 52 : overlap * 12);
       }, 0);
       const reusePenalty = candidate.numbers.reduce(
-        (penalty, number) => penalty + ((usageMap.get(number) || 0) * REUSE_PENALTY_PER_PICK),
+        (penalty, number) => penalty + ((usageMap.get(number) || 0) * (REUSE_PENALTY_PER_PICK + 4)),
         0
       );
+      const coverageBonus = candidate.numbers.reduce((bonus, number) => {
+        const usage = usageMap.get(number) || 0;
+        if (usage === 0) return bonus + 18;
+        if (usage === 1) return bonus + 5;
+        return bonus - 8;
+      }, 0);
       const adjustedScore =
         candidate.score +
-        (candidate.historicalFit.hit3Rate * 4.5) -
+        (candidate.historicalFit.averageMatches * 6) +
+        coverageBonus -
         overlapPenalty -
         reusePenalty -
         (overusedCount * 120);
@@ -1293,8 +1341,12 @@ function runBacktest(draws, rounds = 26) {
   for (let index = startIndex; index < chronological.length; index += 1) {
     const trainingDraws = chronological.slice(0, index);
     const target = chronological[index];
+    const recommendationContext = buildRecommendationContext(trainingDraws, {
+      random: createSeededRandom(target.round)
+    });
     const recommendations = buildRecommendations(trainingDraws, RECOMMENDATION_COUNT, {
-      candidatePoolSize: BACKTEST_CANDIDATE_POOL_SIZE
+      candidatePoolSize: BACKTEST_CANDIDATE_POOL_SIZE,
+      context: recommendationContext
     });
     const matches = recommendations.map((recommendation) => {
       const matchCount = countMatches(recommendation.numbers, target.numbers);
@@ -1366,9 +1418,11 @@ function buildBacktestSnapshot(draws) {
   return value;
 }
 
-function buildCorePayload(draws) {
+function buildCorePayload(draws, options = {}) {
   const snapshot = buildCoreSnapshot(draws);
-  const recommendationContext = buildRecommendationContext(draws);
+  const recommendationContext = options.context || buildRecommendationContext(draws, {
+    luckEnabled: options.luckEnabled
+  });
   const recommendations = buildRecommendations(draws, RECOMMENDATION_COUNT, {
     context: recommendationContext
   });
@@ -1591,11 +1645,16 @@ app.delete("/api/lotto/draws/:round", (req, res) => {
   sendAppState(res);
 });
 
-app.post("/api/lotto/recommendations", async (_req, res) => {
+app.post("/api/lotto/recommendations", async (req, res) => {
   try {
     const draws = await getAvailableDraws(false);
-    const payload = buildCorePayload(draws);
-    storeCorePayload(draws, payload);
+    const luckEnabled = normalizeLuckEnabled(req.body?.luckEnabled);
+    const payload = buildCorePayload(draws, {
+      luckEnabled
+    });
+    if (!luckEnabled) {
+      storeCorePayload(draws, payload);
+    }
     res.json({
       recommendations: payload.recommendations,
       targetRange: payload.targetRange,
@@ -1610,11 +1669,15 @@ app.post("/api/lotto/recommendations", async (_req, res) => {
 app.post("/api/lotto/custom-recommendation", async (req, res) => {
   try {
     const draws = await getAvailableDraws(false);
+    const recommendationContext = buildRecommendationContext(draws, {
+      luckEnabled: normalizeLuckEnabled(req.body?.luckEnabled)
+    });
     const customRecommendation = buildCustomRecommendation(
       draws,
       req.body?.targetHit3Rate,
       req.body?.fixedNumber,
-      req.body?.excludedNumber
+      req.body?.excludedNumber,
+      recommendationContext
     );
 
     if (!customRecommendation) {

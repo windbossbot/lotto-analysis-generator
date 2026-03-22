@@ -467,6 +467,34 @@ h1 {
   font-size: 0.86rem;
 }
 
+.luck-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 10px;
+  align-items: start;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.luck-toggle input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+}
+
+.luck-toggle span {
+  font-weight: 700;
+}
+
+.luck-toggle small {
+  display: block;
+  grid-column: 2;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .status-message {
   min-height: 20px;
   margin: 6px 0 0;
@@ -866,14 +894,14 @@ h1 {
 
 .score-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 8px;
   margin-top: 10px;
 }
 
 .score-grid.compact {
   margin-top: 8px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
 }
 
 .score-chip,
@@ -886,6 +914,11 @@ h1 {
 
 .score-chip:first-child {
   background: linear-gradient(180deg, rgba(255, 243, 207, 0.95), rgba(255, 255, 255, 0.8));
+}
+
+.score-chip.highlight {
+  background: linear-gradient(180deg, rgba(223, 241, 229, 0.95), rgba(255, 255, 255, 0.82));
+  border-color: rgba(45, 129, 85, 0.2);
 }
 
 .score-chip span,

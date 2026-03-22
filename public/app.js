@@ -7,6 +7,7 @@ const state = {
   customRecommendation: null,
   targetRange: null,
   calcStatus: null,
+  luckEnabled: false,
   latestMeta: null,
   flow: {
     syncDone: false
@@ -31,6 +32,7 @@ const targetHit3RangeEl = document.getElementById("target-hit3-range");
 const targetHit3InputEl = document.getElementById("target-hit3-input");
 const targetFixedNumberEl = document.getElementById("target-fixed-number");
 const targetExcludedNumberEl = document.getElementById("target-excluded-number");
+const luckModeToggleEl = document.getElementById("luck-mode-toggle");
 const syncButtonEl = document.getElementById("sync-button");
 const refreshButtonEl = document.getElementById("refresh-button");
 const latestRoundLabelEl = document.getElementById("latest-round-label");
@@ -77,6 +79,10 @@ function ballClass(number) {
 
 function ball(number, tone = "") {
   return `<span class="ball ${ballClass(number)} ${tone}">${number}</span>`;
+}
+
+function isLuckModeEnabled() {
+  return Boolean(luckModeToggleEl?.checked);
 }
 
 function summaryCard(label, value, meta) {
@@ -185,6 +191,15 @@ function frequencyCell(item) {
 }
 
 function recommendationCard(item) {
+  const luckChip = item.breakdown?.luckScore
+    ? `
+        <div class="score-chip highlight">
+          <span>운 점수</span>
+          <strong>${item.breakdown.luckScore}</strong>
+        </div>
+      `
+    : "";
+
   return `
     <article class="recommendation-card">
       <div class="recommendation-head">
@@ -216,6 +231,7 @@ function recommendationCard(item) {
           <span>조합 패턴</span>
           <strong>${item.breakdown.patternScore}</strong>
         </div>
+        ${luckChip}
       </div>
       <div class="score-grid compact">
         <div class="score-chip">
@@ -288,6 +304,15 @@ function customRecommendationCard(item) {
     return `<div class="empty-state">아직 맞춤 조합이 없습니다.</div>`;
   }
 
+  const luckChip = item.breakdown?.luckScore
+    ? `
+        <div class="score-chip highlight">
+          <span>운 점수</span>
+          <strong>${item.breakdown.luckScore}</strong>
+        </div>
+      `
+    : "";
+
   return `
     <article class="recommendation-card spotlight">
       <div class="recommendation-head">
@@ -321,6 +346,7 @@ function customRecommendationCard(item) {
           <span>4등권 추정</span>
           <strong>${item.historicalFit.hit4Rate}%</strong>
         </div>
+        ${luckChip}
       </div>
     </article>
   `;
@@ -552,7 +578,8 @@ function syncTargetInputs(nextValue) {
   targetHit3InputEl.value = normalized;
   const fixedLabel = targetFixedNumberEl.value ? `${targetFixedNumberEl.value}번 포함` : "포함 번호 없음";
   const excludedLabel = targetExcludedNumberEl.value ? `${targetExcludedNumberEl.value}번 제외` : "제외 번호 없음";
-  targetHelpEl.textContent = `현재 목표값 ${normalized}% · ${fixedLabel} · ${excludedLabel} 기준으로 맞춤 1조합을 생성합니다.`;
+  const luckLabel = isLuckModeEnabled() ? " · 운 요소 10% 켜짐" : "";
+  targetHelpEl.textContent = `현재 목표값 ${normalized}% · ${fixedLabel} · ${excludedLabel}${luckLabel} 기준으로 맞춤 1조합을 생성합니다.`;
 }
 
 function renderHistory() {
@@ -745,14 +772,16 @@ async function onTargetGenerateClick() {
       body: JSON.stringify({
         targetHit3Rate: clampTargetValue(targetHit3InputEl.value),
         fixedNumber: targetFixedNumberEl.value ? Number(targetFixedNumberEl.value) : null,
-        excludedNumber: targetExcludedNumberEl.value ? Number(targetExcludedNumberEl.value) : null
+        excludedNumber: targetExcludedNumberEl.value ? Number(targetExcludedNumberEl.value) : null,
+        luckEnabled: isLuckModeEnabled()
       })
     });
     state.customRecommendation = payload.customRecommendation || null;
     renderCustomRecommendation();
     const fixedLabel = targetFixedNumberEl.value ? ` · ${targetFixedNumberEl.value}번 포함` : "";
     const excludedLabel = targetExcludedNumberEl.value ? ` · ${targetExcludedNumberEl.value}번 제외` : "";
-    targetHelpEl.textContent = `목표 ${targetHit3InputEl.value}%${fixedLabel}${excludedLabel} 기준 맞춤 조합을 생성했습니다.`;
+    const luckLabel = isLuckModeEnabled() ? " · 운 요소 10% 반영" : "";
+    targetHelpEl.textContent = `목표 ${targetHit3InputEl.value}%${fixedLabel}${excludedLabel}${luckLabel} 기준 맞춤 조합을 생성했습니다.`;
   } catch (error) {
     targetHelpEl.textContent = error.message;
   } finally {
@@ -765,7 +794,10 @@ async function onGenerateClick() {
 
   try {
     const payload = await sendJson("/api/lotto/recommendations", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify({
+        luckEnabled: isLuckModeEnabled()
+      })
     });
     state.recommendations = payload.recommendations || [];
     state.targetRange = payload.targetRange || state.targetRange;
@@ -792,7 +824,10 @@ async function onRefreshClick() {
   try {
     advanceActionProgress("분석 시작", "추천 조합과 번호 순위를 계산하고 있습니다.", 44);
     const recommendationsPayload = await sendJson("/api/lotto/recommendations", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify({
+        luckEnabled: isLuckModeEnabled()
+      })
     });
     state.recommendations = recommendationsPayload.recommendations || [];
     state.targetRange = recommendationsPayload.targetRange || state.targetRange;
@@ -881,6 +916,10 @@ targetFixedNumberEl.addEventListener("change", () => {
   syncTargetInputs(targetHit3InputEl.value);
 });
 targetExcludedNumberEl.addEventListener("change", () => {
+  syncTargetInputs(targetHit3InputEl.value);
+});
+luckModeToggleEl.addEventListener("change", () => {
+  state.luckEnabled = isLuckModeEnabled();
   syncTargetInputs(targetHit3InputEl.value);
 });
 
