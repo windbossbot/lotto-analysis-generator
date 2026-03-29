@@ -28,7 +28,7 @@ const LUCK_FACTOR_RATIO = 0.1;
 const CORE_RECALC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const WEIGHT_FLATTEN_EXPONENT = 0.84;
 const REUSE_PENALTY_PER_PICK = 18;
-const MAX_NUMBER_USAGE_PER_BATCH = 3;
+const MAX_NUMBER_USAGE_PER_BATCH = 2;
 let drawsMemoryCache = null;
 let syncInFlight = null;
 let appCacheMemory = null;
@@ -1040,22 +1040,22 @@ function pickDiversifiedRecommendations(candidates) {
     let bestIndex = 0;
     let bestAdjustedScore = -Infinity;
 
-    // Favor broader coverage across 5 sets so the batch is less concentrated on the same few numbers.
+    // Favor broader coverage across 5 sets and keep any single number from dominating the whole batch.
     remaining.forEach((candidate, index) => {
       const overusedCount = candidate.numbers.filter((number) => (usageMap.get(number) || 0) >= MAX_NUMBER_USAGE_PER_BATCH).length;
       const overlapPenalty = selected.reduce((penalty, picked) => {
         const overlap = candidate.numbers.filter((number) => picked.numbers.includes(number)).length;
-        return penalty + (overlap >= 4 ? 110 : overlap >= 3 ? 52 : overlap * 12);
+        return penalty + (overlap >= 4 ? 120 : overlap >= 3 ? 64 : overlap * 13);
       }, 0);
       const reusePenalty = candidate.numbers.reduce(
-        (penalty, number) => penalty + ((usageMap.get(number) || 0) * (REUSE_PENALTY_PER_PICK + 4)),
+        (penalty, number) => penalty + ((usageMap.get(number) || 0) * (REUSE_PENALTY_PER_PICK + 8)),
         0
       );
       const coverageBonus = candidate.numbers.reduce((bonus, number) => {
         const usage = usageMap.get(number) || 0;
-        if (usage === 0) return bonus + 18;
-        if (usage === 1) return bonus + 5;
-        return bonus - 8;
+        if (usage === 0) return bonus + 20;
+        if (usage === 1) return bonus + 3;
+        return bonus - 12;
       }, 0);
       const adjustedScore =
         candidate.score +
@@ -1063,7 +1063,7 @@ function pickDiversifiedRecommendations(candidates) {
         coverageBonus -
         overlapPenalty -
         reusePenalty -
-        (overusedCount * 120);
+        (overusedCount * 135);
 
       if (adjustedScore > bestAdjustedScore) {
         bestAdjustedScore = adjustedScore;
