@@ -20,7 +20,7 @@ const BACKTEST_WARMUP_DRAWS = 80;
 const BACKTEST_WINDOW = 60;
 const LIVE_CANDIDATE_POOL_SIZE = 180;
 const BACKTEST_CANDIDATE_POOL_SIZE = 10;
-const BACKTEST_ROUNDS = 5;
+const BACKTEST_ROUNDS = 8;
 const TARGET_HIT3_RATE_MIN = 1;
 const TARGET_HIT3_RATE_MAX = 7;
 const TARGET_HIT3_RATE_STEP = 0.1;
@@ -30,6 +30,7 @@ const WEIGHT_FLATTEN_EXPONENT = 0.84;
 const REUSE_PENALTY_PER_PICK = 18;
 const MAX_NUMBER_USAGE_PER_BATCH = 2;
 const PRIME_NUMBERS = new Set([2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43]);
+const BACKTEST_CONFIG_KEY = `${BACKTEST_ROUNDS}:${BACKTEST_WARMUP_DRAWS}:${BACKTEST_CANDIDATE_POOL_SIZE}`;
 let drawsMemoryCache = null;
 let syncInFlight = null;
 let appCacheMemory = null;
@@ -547,6 +548,41 @@ function calculateAcValue(numbers) {
   return diffs.size - (numbers.length - 1);
 }
 
+function getLongestConsecutiveRun(numbers) {
+  if (!numbers.length) {
+    return 0;
+  }
+
+  let longest = 1;
+  let current = 1;
+
+  for (let index = 1; index < numbers.length; index += 1) {
+    if (numbers[index] - numbers[index - 1] === 1) {
+      current += 1;
+      longest = Math.max(longest, current);
+    } else {
+      current = 1;
+    }
+  }
+
+  return longest;
+}
+
+function isArithmeticProgression(numbers) {
+  if (numbers.length < 3) {
+    return false;
+  }
+
+  const step = numbers[1] - numbers[0];
+  for (let index = 2; index < numbers.length; index += 1) {
+    if (numbers[index] - numbers[index - 1] !== step) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function weightedNumberPool(stats) {
   return stats.map((item) => {
     const coldBoost = Math.min(6, item.missCount) * 1.6;
@@ -776,8 +812,19 @@ function isBalancedSet(numbers) {
   const odd = sorted.filter((number) => number % 2 === 1).length;
   const sum = sorted.reduce((total, value) => total + value, 0);
   const sections = new Set(sorted.map((number) => Math.floor((number - 1) / 10))).size;
+  const longestConsecutiveRun = getLongestConsecutiveRun(sorted);
+  const acValue = calculateAcValue(sorted);
 
-  return odd >= 2 && odd <= 4 && sum >= 100 && sum <= 175 && sections >= 3;
+  return (
+    odd >= 2 &&
+    odd <= 4 &&
+    sum >= 100 &&
+    sum <= 175 &&
+    sections >= 3 &&
+    longestConsecutiveRun <= 3 &&
+    acValue >= 5 &&
+    !isArithmeticProgression(sorted)
+  );
 }
 
 function uniqueKey(numbers) {
@@ -1005,6 +1052,8 @@ function scoreCandidate(numbers, context) {
     return counts;
   }, new Map());
   const consecutivePairs = sorted.slice(1).filter((number, index) => number - sorted[index] === 1).length;
+  const longestConsecutiveRun = getLongestConsecutiveRun(sorted);
+  const arithmeticProgression = isArithmeticProgression(sorted);
   const maxGap = getMaxGap(sorted);
   const sections = new Set(sorted.map((number) => Math.floor((number - 1) / 10))).size;
   const acValue = calculateAcValue(sorted);
@@ -1039,14 +1088,17 @@ function scoreCandidate(numbers, context) {
   patternScore -= Math.abs(primeCount - Math.round(analysis.patternSummary.averagePrimeCount || 2)) * 6;
   patternScore -= Math.abs(multipleOf3Count - Math.round(analysis.patternSummary.averageMultipleOf3Count || 2)) * 5;
   patternScore -= consecutivePairs * 16;
+  patternScore -= Math.max(0, longestConsecutiveRun - 2) * 12;
   patternScore -= Math.abs(maxGap - Math.round(analysis.patternSummary.averageMaxGap || 11)) * 2.2;
   patternScore -= maxGap >= 18 ? 10 : 0;
   patternScore -= Math.abs(acValue - Math.round(analysis.patternSummary.averageAc || 7)) * 7;
+  patternScore -= acValue <= 4 ? 18 : 0;
   patternScore -= Math.abs(carryCount - Math.round(analysis.patternSummary.averageCarryOverCount || 1)) * 5;
   patternScore -= endDigitSet.size <= 3 ? 18 : 0;
   patternScore -= Math.max(0, maxRepeatedEndDigit - 2) * 11;
   patternScore -= Math.max(0, topRankCount - 3) * 10;
   patternScore -= Math.max(0, carryCount - 2) * 8;
+  patternScore -= arithmeticProgression ? 52 : 0;
   patternScore += endDigitSet.size >= 5 ? 8 : 0;
   patternScore += coldCount >= 1 && coldCount <= 2 ? 5 : 0;
   patternScore += warmCount >= 2 && warmCount <= 4 ? 7 : warmCount === 0 ? -5 : 0;
@@ -1075,6 +1127,7 @@ function scoreCandidate(numbers, context) {
       odd,
       even: PICKS_PER_DRAW - odd,
       consecutivePairs,
+      longestConsecutiveRun,
       sections,
       acValue,
       lowCount,
@@ -1383,7 +1436,7 @@ function evaluateHitTier(matchCount) {
   return "미적중";
 }
 
-function runBacktest(draws, rounds = 26) {
+function runBacktest(draws, rounds = BACKTEST_ROUNDS) {
   const chronological = [...draws].sort((a, b) => a.round - b.round);
   const startIndex = Math.max(BACKTEST_WARMUP_DRAWS, chronological.length - rounds);
   const history = [];
@@ -1448,7 +1501,7 @@ function runBacktest(draws, rounds = 26) {
 
 function buildBacktestSnapshot(draws) {
   const sortedDraws = [...draws].sort((a, b) => b.round - a.round);
-  const cacheKey = `${sortedDraws[0]?.round || 0}:${sortedDraws.length}`;
+  const cacheKey = `${sortedDraws[0]?.round || 0}:${sortedDraws.length}:${BACKTEST_CONFIG_KEY}`;
 
   if (snapshotCache.backtestKey === cacheKey && snapshotCache.backtestValue) {
     return snapshotCache.backtestValue;
@@ -1549,6 +1602,10 @@ function getCalculationStatus(draws, cache = readAppCache()) {
   const { latestRound } = getLatestDrawMeta(draws);
   const core = cache.core;
   const backtest = cache.backtest;
+  const backtestCurrent = Boolean(backtest?.payload) &&
+    backtest.sourceRound === latestRound &&
+    isCacheFresh(backtest.generatedAt) &&
+    backtest.configKey === BACKTEST_CONFIG_KEY;
 
   return {
     coreReady: Boolean(core?.payload),
@@ -1556,8 +1613,8 @@ function getCalculationStatus(draws, cache = readAppCache()) {
     coreNeedsRefresh: !core?.payload || core.sourceRound !== latestRound || !isCacheFresh(core.generatedAt),
     coreGeneratedAt: core?.generatedAt || null,
     backtestReady: Boolean(backtest?.payload),
-    backtestFresh: Boolean(backtest?.payload) && backtest.sourceRound === latestRound && isCacheFresh(backtest.generatedAt),
-    backtestNeedsRefresh: !backtest?.payload || backtest.sourceRound !== latestRound || !isCacheFresh(backtest.generatedAt),
+    backtestFresh: backtestCurrent,
+    backtestNeedsRefresh: !backtestCurrent,
     backtestGeneratedAt: backtest?.generatedAt || null
   };
 }
@@ -1590,6 +1647,7 @@ function storeBacktestPayload(draws, payload) {
   cache.backtest = {
     sourceRound: latestRound,
     generatedAt: new Date().toISOString(),
+    configKey: BACKTEST_CONFIG_KEY,
     payload
   };
   writeAppCache(cache);

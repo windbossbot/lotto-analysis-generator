@@ -33,11 +33,12 @@ Updated: 2026-04-03
 ## 3. Current Truth
 
 1. `server.js` should reuse a shared core context for recommendation, ranking, and backtest-driven scoring instead of recomputing the same analysis path for every route.
-2. Recommendation scoring now also considers prime-count balance, multiples-of-3 balance, carry-over overlap, max-gap shape, and a warm-number band to reduce over-clustered sets.
+2. Recommendation scoring now also considers prime-count balance, multiples-of-3 balance, carry-over overlap, max-gap shape, a warm-number band, and stronger suppression for long consecutive or arithmetic-progression style sets.
 3. The browser should paint the top-level summary and recommendation panels first, then defer lower-priority history and backtest detail rendering.
-4. Lottery selection logic can improve coverage, diversity, and balance, but it cannot change the actual winning odds.
-5. `data/lotto-draws.json` and `data/lotto-sync-state.json` are mutable current truth files, while `.myclaw` holds the operational record around them.
-6. Project-local ops docs should stay in `.myclaw` unless the project later needs a deliberate repo-root ops surface.
+4. Cached backtest truth should be treated as current only when its config signature matches the active backtest settings, and the current snapshot target is 8 recent rounds after the warmup window.
+5. Lottery selection logic can improve coverage, diversity, and balance, but it cannot change the actual winning odds.
+6. `data/lotto-draws.json` and `data/lotto-sync-state.json` are mutable current truth files, while `.myclaw` holds the operational record around them.
+7. Project-local ops docs should stay in `.myclaw` unless the project later needs a deliberate repo-root ops surface.
 
 ## 4. Practical Rule
 
