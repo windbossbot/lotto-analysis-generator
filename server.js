@@ -553,9 +553,9 @@ function buildWeightedProfile(draws) {
   return { stats, pairScores };
 }
 
-function scoreNumbersFromHistory(draws) {
-  const analysis = buildAnalysis(draws);
-  const weightedProfile = buildWeightedProfile(draws);
+function scoreNumbersFromHistory(draws, options = {}) {
+  const analysis = options.analysis || buildAnalysis(draws);
+  const weightedProfile = options.weightedProfile || buildWeightedProfile(draws);
   const hotSet = new Set(analysis.hotNumbers.map((item) => item.number));
   const coldSet = new Set(analysis.coldNumbers.map((item) => item.number));
 
@@ -613,10 +613,7 @@ function buildBacktestStats(draws) {
   }));
 }
 
-function buildNextNumberRanking(draws) {
-  const scoreMap = new Map(scoreNumbersFromHistory(draws).map((item) => [item.number, item]));
-  const backtestMap = new Map(buildBacktestStats(draws).map((item) => [item.number, item]));
-
+function buildNextNumberRankingFromMaps(scoreMap, backtestMap) {
   return Array.from({ length: LOTTO_MAX }, (_, index) => {
     const number = index + 1;
     const recentScore = scoreMap.get(number)?.score || 0;
@@ -638,6 +635,10 @@ function buildNextNumberRanking(draws) {
       ...item,
       rank: index + 1
     }));
+}
+
+function buildNextNumberRanking(draws) {
+  return buildCoreContext(draws).nextNumberRanking;
 }
 
 function clampTargetHit3Rate(value) {
@@ -919,6 +920,7 @@ function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existi
  *   backtestMap: Map<number, { number: number, hitRate: number, pickRate: number }>,
  *   pairScores: Map<string, number>,
  *   weightedPool: { number: number, weight: number }[],
+ *   nextNumberRanking: Array<{ rank: number, number: number, totalScore: number }>,
  *   topRankSet: Set<number>,
  *   carrySet: Set<number>,
  *   coldSet: Set<number>,
@@ -928,27 +930,22 @@ function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existi
  * }}
  */
 function buildRecommendationContext(draws, options = {}) {
-  const analysis = buildAnalysis(draws);
-  const scoreMap = new Map(scoreNumbersFromHistory(draws).map((item) => [item.number, item]));
-  const backtestMap = new Map(buildBacktestStats(draws).map((item) => [item.number, item]));
-  const pairScores = buildWeightedProfile(draws).pairScores;
-  const weightedPool = [...scoreMap.values()].map((item) => {
-    const rawWeight = 1 + item.score + ((backtestMap.get(item.number)?.hitRate || 0) * 30);
-    return {
-      number: item.number,
-      weight: Math.max(1, Number(Math.pow(rawWeight, WEIGHT_FLATTEN_EXPONENT).toFixed(4)))
-    };
-  });
+  const coreContext = options.coreContext || buildCoreContext(draws);
+  const analysis = coreContext.analysis;
+  const scoreMap = coreContext.scoreMap;
+  const backtestMap = coreContext.backtestMap;
+  const pairScores = coreContext.pairScores;
 
   return {
     analysis,
     scoreMap,
     backtestMap,
     pairScores,
-    weightedPool,
-    topRankSet: new Set([...scoreMap.values()].sort((a, b) => b.score - a.score).slice(0, 10).map((item) => item.number)),
-    carrySet: new Set(analysis.patternSummary.carryOverNumbers || []),
-    coldSet: new Set(analysis.coldNumbers.map((item) => item.number)),
+    weightedPool: coreContext.weightedPool,
+    nextNumberRanking: coreContext.nextNumberRanking,
+    topRankSet: coreContext.topRankSet,
+    carrySet: coreContext.carrySet,
+    coldSet: coreContext.coldSet,
     luckEnabled: normalizeLuckEnabled(options.luckEnabled),
     luckFactor: LUCK_FACTOR_RATIO,
     random: typeof options.random === "function" ? options.random : Math.random
@@ -1203,7 +1200,7 @@ function buildRecommendations(draws, count = RECOMMENDATION_COUNT, options = {})
 
   return selected.map((item, index) => ({
     ...(function buildCandidateMeta() {
-      const historicalFit = evaluateCandidateAgainstHistory(item.numbers, draws, 260);
+      const historicalFit = item.historicalFit || evaluateCandidateAgainstHistory(item.numbers, draws, 260);
       const normalized = maxScore === minScore ? 1 : (item.score - minScore) / (maxScore - minScore);
       const modelChance = Number(
         Math.min(
@@ -1386,24 +1383,6 @@ function runBacktest(draws, rounds = 26) {
   };
 }
 
-function buildCoreSnapshot(draws) {
-  const sortedDraws = [...draws].sort((a, b) => b.round - a.round);
-  const cacheKey = `${sortedDraws[0]?.round || 0}:${sortedDraws.length}`;
-
-  if (snapshotCache.coreKey === cacheKey && snapshotCache.coreValue) {
-    return snapshotCache.coreValue;
-  }
-
-  const value = {
-    analysis: buildAnalysis(sortedDraws),
-    nextNumberRanking: buildNextNumberRanking(sortedDraws)
-  };
-
-  snapshotCache.coreKey = cacheKey;
-  snapshotCache.coreValue = value;
-  return value;
-}
-
 function buildBacktestSnapshot(draws) {
   const sortedDraws = [...draws].sort((a, b) => b.round - a.round);
   const cacheKey = `${sortedDraws[0]?.round || 0}:${sortedDraws.length}`;
@@ -1418,10 +1397,54 @@ function buildBacktestSnapshot(draws) {
   return value;
 }
 
+function buildCoreContext(draws) {
+  const sortedDraws = [...draws].sort((a, b) => b.round - a.round);
+  const cacheKey = `${sortedDraws[0]?.round || 0}:${sortedDraws.length}`;
+
+  if (snapshotCache.coreKey === cacheKey && snapshotCache.coreValue) {
+    return snapshotCache.coreValue;
+  }
+
+  const analysis = buildAnalysis(sortedDraws);
+  const weightedProfile = buildWeightedProfile(sortedDraws);
+  const scoreEntries = scoreNumbersFromHistory(sortedDraws, {
+    analysis,
+    weightedProfile
+  });
+  const scoreMap = new Map(scoreEntries.map((item) => [item.number, item]));
+  const backtestEntries = buildBacktestStats(sortedDraws);
+  const backtestMap = new Map(backtestEntries.map((item) => [item.number, item]));
+  const pairScores = weightedProfile.pairScores;
+  const weightedPool = [...scoreMap.values()].map((item) => {
+    const rawWeight = 1 + item.score + ((backtestMap.get(item.number)?.hitRate || 0) * 30);
+    return {
+      number: item.number,
+      weight: Math.max(1, Number(Math.pow(rawWeight, WEIGHT_FLATTEN_EXPONENT).toFixed(4)))
+    };
+  });
+
+  const value = {
+    analysis,
+    scoreMap,
+    backtestMap,
+    pairScores,
+    weightedPool,
+    nextNumberRanking: buildNextNumberRankingFromMaps(scoreMap, backtestMap),
+    topRankSet: new Set([...scoreMap.values()].sort((a, b) => b.score - a.score).slice(0, 10).map((item) => item.number)),
+    carrySet: new Set(analysis.patternSummary.carryOverNumbers || []),
+    coldSet: new Set(analysis.coldNumbers.map((item) => item.number))
+  };
+
+  snapshotCache.coreKey = cacheKey;
+  snapshotCache.coreValue = value;
+  return value;
+}
+
 function buildCorePayload(draws, options = {}) {
-  const snapshot = buildCoreSnapshot(draws);
+  const coreContext = options.coreContext || buildCoreContext(draws);
   const recommendationContext = options.context || buildRecommendationContext(draws, {
-    luckEnabled: options.luckEnabled
+    luckEnabled: options.luckEnabled,
+    coreContext
   });
   const recommendations = buildRecommendations(draws, RECOMMENDATION_COUNT, {
     context: recommendationContext
@@ -1430,8 +1453,8 @@ function buildCorePayload(draws, options = {}) {
   const customRecommendation = buildCustomRecommendation(draws, targetRange.defaultHit3Rate, null, null, recommendationContext);
 
   return {
-    analysis: snapshot.analysis,
-    nextNumberRanking: snapshot.nextNumberRanking,
+    analysis: coreContext.analysis,
+    nextNumberRanking: coreContext.nextNumberRanking,
     recommendations,
     customRecommendation,
     targetRange
@@ -1578,19 +1601,16 @@ app.get("/health", (_req, res) => {
 app.get("/api/lotto", async (_req, res) => {
   try {
     const draws = await getAvailableDraws(false);
-    const snapshot = buildCoreSnapshot(draws);
-    const recommendations = buildRecommendations(draws, RECOMMENDATION_COUNT);
-    const targetRange = buildTargetRange(recommendations);
-    const customRecommendation = buildCustomRecommendation(draws, targetRange.defaultHit3Rate);
+    const payload = buildCorePayload(draws);
     const syncState = readSyncState();
 
     res.json({
       draws,
-      analysis: snapshot.analysis,
-      nextNumberRanking: snapshot.nextNumberRanking,
-      recommendations,
-      customRecommendation,
-      targetRange,
+      analysis: payload.analysis,
+      nextNumberRanking: payload.nextNumberRanking,
+      recommendations: payload.recommendations,
+      customRecommendation: payload.customRecommendation,
+      targetRange: payload.targetRange,
       sync: syncState,
       limits: {
         min: LOTTO_MIN,

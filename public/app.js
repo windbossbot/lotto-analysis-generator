@@ -116,6 +116,15 @@ function completeActionProgress(actionLabel, step) {
   setLoadingState(`${actionLabel} 완료`, step, 100, "done");
 }
 
+function deferRender(task) {
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(() => task(), { timeout: 1200 });
+    return;
+  }
+
+  window.setTimeout(task, 0);
+}
+
 function formatSyncLabel(sync) {
   if (!sync?.lastSyncedAt) {
     return "아직 동기화 기록이 없습니다.";
@@ -629,12 +638,14 @@ function syncApp(payload) {
   renderCustomRecommendation();
   renderQuickPicks();
   renderNumberRanking();
-  renderSections();
-  renderInsights();
-  renderTemperature();
-  renderFrequencyGrid();
   renderRecommendations();
-  renderHistory();
+  deferRender(() => {
+    renderSections();
+    renderInsights();
+    renderTemperature();
+    renderFrequencyGrid();
+    renderHistory();
+  });
 }
 
 async function sendJson(url, options = {}) {
@@ -744,9 +755,9 @@ async function fetchBacktest() {
   state.backtest = payload.backtest || null;
   state.calcStatus = payload.calcStatus || state.calcStatus;
   updateCalcButtons();
-  renderBacktest();
 
   if (state.backtest) {
+    deferRender(renderBacktest);
     setLoadingState("로딩 완료", "저장된 분석과 백테스트까지 준비되었습니다.", 100, "done");
   } else {
     backtestCaptionEl.textContent = "백테스트가 아직 계산되지 않았습니다. 상단의 '분석 시작'을 눌러 한 번에 계산하세요.";
@@ -923,15 +934,19 @@ luckModeToggleEl.addEventListener("change", () => {
   syncTargetInputs(targetHit3InputEl.value);
 });
 
-fetchApp().catch((error) => {
-  setLoadingState("불러오기 실패", error.message, 100, "error");
-  analysisCaptionEl.textContent = error.message;
-  syncCaptionEl.textContent = error.message;
-  drawHistoryEl.innerHTML = `<div class="empty-state">데이터를 불러오지 못했습니다.</div>`;
-});
-
-fetchBacktest().catch((error) => {
-  setLoadingState("부분 로딩 완료", "기본 화면은 준비됐지만 백테스트는 불러오지 못했습니다.", 88, "done");
-  backtestCaptionEl.textContent = error.message;
-  backtestHistoryEl.innerHTML = `<div class="empty-state">백테스트를 불러오지 못했습니다.</div>`;
-});
+fetchApp()
+  .then(() => {
+    deferRender(() => {
+      fetchBacktest().catch((error) => {
+        setLoadingState("부분 로딩 완료", "기본 화면은 준비됐지만 백테스트는 불러오지 못했습니다.", 88, "done");
+        backtestCaptionEl.textContent = error.message;
+        backtestHistoryEl.innerHTML = `<div class="empty-state">백테스트를 불러오지 못했습니다.</div>`;
+      });
+    });
+  })
+  .catch((error) => {
+    setLoadingState("불러오기 실패", error.message, 100, "error");
+    analysisCaptionEl.textContent = error.message;
+    syncCaptionEl.textContent = error.message;
+    drawHistoryEl.innerHTML = `<div class="empty-state">데이터를 불러오지 못했습니다.</div>`;
+  });
