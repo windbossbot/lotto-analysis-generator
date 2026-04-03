@@ -33,14 +33,14 @@ Updated: 2026-04-03
 ## 3. Current Truth
 
 1. `server.js` should reuse a shared core context for recommendation, ranking, and backtest-driven scoring instead of recomputing the same analysis path for every route.
-2. The browser should paint the top-level summary and recommendation panels first, then defer lower-priority history and backtest detail rendering.
-3. Lottery selection logic can improve coverage, diversity, and balance, but it cannot change the actual winning odds.
-4. `data/lotto-draws.json` and `data/lotto-sync-state.json` are mutable current truth files, while `.myclaw` holds the operational record around them.
-5. Project-local ops docs should stay in `.myclaw` unless the project later needs a deliberate repo-root ops surface.
+2. Recommendation scoring now also considers prime-count balance, multiples-of-3 balance, carry-over overlap, max-gap shape, and a warm-number band to reduce over-clustered sets.
+3. The browser should paint the top-level summary and recommendation panels first, then defer lower-priority history and backtest detail rendering.
+4. Lottery selection logic can improve coverage, diversity, and balance, but it cannot change the actual winning odds.
+5. `data/lotto-draws.json` and `data/lotto-sync-state.json` are mutable current truth files, while `.myclaw` holds the operational record around them.
+6. Project-local ops docs should stay in `.myclaw` unless the project later needs a deliberate repo-root ops surface.
 
 ## 4. Practical Rule
 
 1. use this nest as the local operations home first
 2. keep the shared engine as a reusable helper source only
 3. avoid creating duplicate current docs in both the project root and this nest without a clear ownership split
-

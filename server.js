@@ -29,6 +29,7 @@ const CORE_RECALC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const WEIGHT_FLATTEN_EXPONENT = 0.84;
 const REUSE_PENALTY_PER_PICK = 18;
 const MAX_NUMBER_USAGE_PER_BATCH = 2;
+const PRIME_NUMBERS = new Set([2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43]);
 let drawsMemoryCache = null;
 let syncInFlight = null;
 let appCacheMemory = null;
@@ -130,6 +131,22 @@ function writeAppCache(cache) {
 
 function sortNumbers(numbers) {
   return [...numbers].sort((a, b) => a - b);
+}
+
+function countPrimeNumbers(numbers) {
+  return numbers.filter((number) => PRIME_NUMBERS.has(number)).length;
+}
+
+function countMultiples(numbers, divisor) {
+  return numbers.filter((number) => number % divisor === 0).length;
+}
+
+function getMaxGap(numbers) {
+  if (numbers.length < 2) {
+    return 0;
+  }
+
+  return Math.max(...numbers.slice(1).map((number, index) => number - numbers[index]));
 }
 
 function normalizeDraw(draw) {
@@ -432,6 +449,9 @@ function buildAnalysis(draws) {
   const endDigitCounts = Array.from({ length: 10 }, () => 0);
   const acValues = [];
   const lowHighBalances = [];
+  const primeCounts = [];
+  const multipleOf3Counts = [];
+  const maxGaps = [];
   let consecutiveDrawCount = 0;
   recentDraws.forEach((draw) => {
     draw.numbers.forEach((number) => {
@@ -445,6 +465,9 @@ function buildAnalysis(draws) {
     }
     acValues.push(calculateAcValue(draw.numbers));
     lowHighBalances.push(draw.numbers.filter((number) => number <= 22).length);
+    primeCounts.push(countPrimeNumbers(draw.numbers));
+    multipleOf3Counts.push(countMultiples(draw.numbers, 3));
+    maxGaps.push(getMaxGap(draw.numbers));
   });
 
   const pairMap = new Map();
@@ -469,6 +492,9 @@ function buildAnalysis(draws) {
     sortedDraws.length >= 2
       ? sortedDraws[0].numbers.filter((number) => sortedDraws[1].numbers.includes(number))
       : [];
+  const carryOverCounts = recentDraws.slice(0, -1).map((draw, index) =>
+    draw.numbers.filter((number) => recentDraws[index + 1].numbers.includes(number)).length
+  );
 
   return {
     drawCount: draws.length,
@@ -489,6 +515,18 @@ function buildAnalysis(draws) {
         : 0,
       averageLowCount: lowHighBalances.length
         ? Number((lowHighBalances.reduce((total, value) => total + value, 0) / lowHighBalances.length).toFixed(1))
+        : 0,
+      averagePrimeCount: primeCounts.length
+        ? Number((primeCounts.reduce((total, value) => total + value, 0) / primeCounts.length).toFixed(1))
+        : 0,
+      averageMultipleOf3Count: multipleOf3Counts.length
+        ? Number((multipleOf3Counts.reduce((total, value) => total + value, 0) / multipleOf3Counts.length).toFixed(1))
+        : 0,
+      averageMaxGap: maxGaps.length
+        ? Number((maxGaps.reduce((total, value) => total + value, 0) / maxGaps.length).toFixed(1))
+        : 0,
+      averageCarryOverCount: carryOverCounts.length
+        ? Number((carryOverCounts.reduce((total, value) => total + value, 0) / carryOverCounts.length).toFixed(1))
         : 0,
       endDigitCounts,
       consecutiveDrawCount,
@@ -924,6 +962,7 @@ function generateSeededCandidate(mode, scoreMap, backtestMap, pairScores, existi
  *   topRankSet: Set<number>,
  *   carrySet: Set<number>,
  *   coldSet: Set<number>,
+ *   warmSet: Set<number>,
  *   luckEnabled: boolean,
  *   luckFactor: number,
  *   random: () => number
@@ -946,6 +985,7 @@ function buildRecommendationContext(draws, options = {}) {
     topRankSet: coreContext.topRankSet,
     carrySet: coreContext.carrySet,
     coldSet: coreContext.coldSet,
+    warmSet: coreContext.warmSet,
     luckEnabled: normalizeLuckEnabled(options.luckEnabled),
     luckFactor: LUCK_FACTOR_RATIO,
     random: typeof options.random === "function" ? options.random : Math.random
@@ -953,19 +993,28 @@ function buildRecommendationContext(draws, options = {}) {
 }
 
 function scoreCandidate(numbers, context) {
-  const { scoreMap, backtestMap, pairScores, analysis, topRankSet, carrySet, coldSet, luckEnabled, luckFactor, random } = context;
+  const { scoreMap, backtestMap, pairScores, analysis, topRankSet, carrySet, coldSet, warmSet, luckEnabled, luckFactor, random } = context;
   const sorted = sortNumbers(numbers);
   const sum = sorted.reduce((total, value) => total + value, 0);
   const odd = sorted.filter((number) => number % 2 === 1).length;
   const lowCount = sorted.filter((number) => number <= 22).length;
   const endDigitSet = new Set(sorted.map((number) => number % 10));
+  const endDigitCounts = sorted.reduce((counts, number) => {
+    const key = number % 10;
+    counts.set(key, (counts.get(key) || 0) + 1);
+    return counts;
+  }, new Map());
   const consecutivePairs = sorted.slice(1).filter((number, index) => number - sorted[index] === 1).length;
-  const maxGap = Math.max(...sorted.slice(1).map((number, index) => number - sorted[index]));
+  const maxGap = getMaxGap(sorted);
   const sections = new Set(sorted.map((number) => Math.floor((number - 1) / 10))).size;
   const acValue = calculateAcValue(sorted);
+  const primeCount = countPrimeNumbers(sorted);
+  const multipleOf3Count = countMultiples(sorted, 3);
   const topRankCount = sorted.filter((number) => topRankSet.has(number)).length;
   const carryCount = sorted.filter((number) => carrySet.has(number)).length;
   const coldCount = sorted.filter((number) => coldSet.has(number)).length;
+  const warmCount = sorted.filter((number) => warmSet.has(number)).length;
+  const maxRepeatedEndDigit = Math.max(...endDigitCounts.values());
 
   let numberScore = 0;
   let backtestScore = 0;
@@ -987,14 +1036,20 @@ function scoreCandidate(numbers, context) {
   patternScore -= Math.abs(sum - analysis.patternSummary.averageSum) * 0.75;
   patternScore -= Math.abs(odd - Math.round(analysis.patternSummary.averageOddCount)) * 12;
   patternScore -= Math.abs(lowCount - Math.round(analysis.patternSummary.averageLowCount || 3)) * 7;
+  patternScore -= Math.abs(primeCount - Math.round(analysis.patternSummary.averagePrimeCount || 2)) * 6;
+  patternScore -= Math.abs(multipleOf3Count - Math.round(analysis.patternSummary.averageMultipleOf3Count || 2)) * 5;
   patternScore -= consecutivePairs * 16;
+  patternScore -= Math.abs(maxGap - Math.round(analysis.patternSummary.averageMaxGap || 11)) * 2.2;
   patternScore -= maxGap >= 18 ? 10 : 0;
   patternScore -= Math.abs(acValue - Math.round(analysis.patternSummary.averageAc || 7)) * 7;
+  patternScore -= Math.abs(carryCount - Math.round(analysis.patternSummary.averageCarryOverCount || 1)) * 5;
   patternScore -= endDigitSet.size <= 3 ? 18 : 0;
+  patternScore -= Math.max(0, maxRepeatedEndDigit - 2) * 11;
   patternScore -= Math.max(0, topRankCount - 3) * 10;
   patternScore -= Math.max(0, carryCount - 2) * 8;
   patternScore += endDigitSet.size >= 5 ? 8 : 0;
   patternScore += coldCount >= 1 && coldCount <= 2 ? 5 : 0;
+  patternScore += warmCount >= 2 && warmCount <= 4 ? 7 : warmCount === 0 ? -5 : 0;
   patternScore += sections >= 4 ? 10 : sections >= 3 ? 4 : -14;
   if (sorted.join(",") === "1,2,3,4,5,6") {
     patternScore -= 120;
@@ -1023,6 +1078,10 @@ function scoreCandidate(numbers, context) {
       sections,
       acValue,
       lowCount,
+      primeCount,
+      multipleOf3Count,
+      warmCount,
+      maxGap,
       endDigitVariety: endDigitSet.size
     }
   };
@@ -1110,9 +1169,13 @@ function labelRecommendation(numbers, analysis) {
   const hotCount = numbers.filter((number) => hotSet.has(number)).length;
   const coldCount = numbers.filter((number) => coldSet.has(number)).length;
   const carryCount = numbers.filter((number) => carrySet.has(number)).length;
+  const primeCount = countPrimeNumbers(numbers);
 
   if (coldCount >= 3) {
     return "콜드 보강형";
+  }
+  if (primeCount >= 3) {
+    return "소수 균형형";
   }
   if (numbers.some((number, index) => index > 0 && number - numbers[index - 1] === 1)) {
     return "연속 리스크 혼합형";
@@ -1432,7 +1495,12 @@ function buildCoreContext(draws) {
     nextNumberRanking: buildNextNumberRankingFromMaps(scoreMap, backtestMap),
     topRankSet: new Set([...scoreMap.values()].sort((a, b) => b.score - a.score).slice(0, 10).map((item) => item.number)),
     carrySet: new Set(analysis.patternSummary.carryOverNumbers || []),
-    coldSet: new Set(analysis.coldNumbers.map((item) => item.number))
+    coldSet: new Set(analysis.coldNumbers.map((item) => item.number)),
+    warmSet: new Set(
+      analysis.numberStats
+        .filter((item) => item.missCount >= 2 && item.missCount <= 12)
+        .map((item) => item.number)
+    )
   };
 
   snapshotCache.coreKey = cacheKey;
