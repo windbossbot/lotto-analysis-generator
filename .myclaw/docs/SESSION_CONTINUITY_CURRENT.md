@@ -27,6 +27,7 @@ Updated: 2026-04-03
 3. created local state placeholders under `C:\Users\KGWPC\workspace\lotto\.myclaw\state`
 4. prepared durable local state for the early bootstrap direction window
 5. kept reusable engine logic in the shared core instead of copying the whole engine into the project
+6. extended the lotto payload flow so cached backtest/status data can be reused instead of forcing a redundant client fetch
 
 ## 4. Biggest Remaining Uncertainty
 

@@ -36,9 +36,11 @@ Updated: 2026-04-03
 2. Recommendation scoring now also considers prime-count balance, multiples-of-3 balance, carry-over overlap, max-gap shape, a warm-number band, and stronger suppression for long consecutive or arithmetic-progression style sets.
 3. The browser should paint the top-level summary and recommendation panels first, then defer lower-priority history and backtest detail rendering.
 4. Cached backtest truth should be treated as current only when its config signature matches the active backtest settings, and the current snapshot target is 8 recent rounds after the warmup window.
-5. Lottery selection logic can improve coverage, diversity, and balance, but it cannot change the actual winning odds.
-6. `data/lotto-draws.json` and `data/lotto-sync-state.json` are mutable current truth files, while `.myclaw` holds the operational record around them.
-7. Project-local ops docs should stay in `.myclaw` unless the project later needs a deliberate repo-root ops surface.
+5. The base `/api/lotto` response now returns cached `backtest`, `calcStatus`, and `latestMeta` so the browser can skip a redundant backtest fetch when the cache is fresh.
+6. Recommendation scoring also applies a stronger recent-overlap penalty and a broader section-coverage bonus so the chosen sets spread across the grid more evenly.
+7. Lottery selection logic can improve coverage, diversity, and balance, but it cannot change the actual winning odds.
+8. `data/lotto-draws.json` and `data/lotto-sync-state.json` are mutable current truth files, while `.myclaw` holds the operational record around them.
+9. Project-local ops docs should stay in `.myclaw` unless the project later needs a deliberate repo-root ops surface.
 
 ## 4. Practical Rule
 

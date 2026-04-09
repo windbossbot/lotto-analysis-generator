@@ -1063,6 +1063,10 @@ function scoreCandidate(numbers, context) {
   const carryCount = sorted.filter((number) => carrySet.has(number)).length;
   const coldCount = sorted.filter((number) => coldSet.has(number)).length;
   const warmCount = sorted.filter((number) => warmSet.has(number)).length;
+  const recentOverlapCount = analysis.recentDraws.slice(0, 4).reduce(
+    (total, draw) => total + countMatches(sorted, draw.numbers),
+    0
+  );
   const maxRepeatedEndDigit = Math.max(...endDigitCounts.values());
 
   let numberScore = 0;
@@ -1094,6 +1098,7 @@ function scoreCandidate(numbers, context) {
   patternScore -= Math.abs(acValue - Math.round(analysis.patternSummary.averageAc || 7)) * 7;
   patternScore -= acValue <= 4 ? 18 : 0;
   patternScore -= Math.abs(carryCount - Math.round(analysis.patternSummary.averageCarryOverCount || 1)) * 5;
+  patternScore -= recentOverlapCount * 6;
   patternScore -= endDigitSet.size <= 3 ? 18 : 0;
   patternScore -= Math.max(0, maxRepeatedEndDigit - 2) * 11;
   patternScore -= Math.max(0, topRankCount - 3) * 10;
@@ -1102,7 +1107,7 @@ function scoreCandidate(numbers, context) {
   patternScore += endDigitSet.size >= 5 ? 8 : 0;
   patternScore += coldCount >= 1 && coldCount <= 2 ? 5 : 0;
   patternScore += warmCount >= 2 && warmCount <= 4 ? 7 : warmCount === 0 ? -5 : 0;
-  patternScore += sections >= 4 ? 10 : sections >= 3 ? 4 : -14;
+  patternScore += sections >= 5 ? 14 : sections === 4 ? 11 : sections === 3 ? 4 : -14;
   if (sorted.join(",") === "1,2,3,4,5,6") {
     patternScore -= 120;
   }
@@ -1144,6 +1149,7 @@ function pickDiversifiedRecommendations(candidates) {
   const selected = [];
   const remaining = [...candidates];
   const usageMap = new Map();
+  const sectionCoverageMap = new Map();
 
   while (remaining.length > 0 && selected.length < RECOMMENDATION_COUNT) {
     let bestIndex = 0;
@@ -1151,6 +1157,7 @@ function pickDiversifiedRecommendations(candidates) {
 
     // Favor broader coverage across 5 sets and keep any single number from dominating the whole batch.
     remaining.forEach((candidate, index) => {
+      const candidateSections = new Set(candidate.numbers.map((number) => Math.floor((number - 1) / 10)));
       const overusedCount = candidate.numbers.filter((number) => (usageMap.get(number) || 0) >= MAX_NUMBER_USAGE_PER_BATCH).length;
       const overlapPenalty = selected.reduce((penalty, picked) => {
         const overlap = candidate.numbers.filter((number) => picked.numbers.includes(number)).length;
@@ -1166,11 +1173,18 @@ function pickDiversifiedRecommendations(candidates) {
         if (usage === 1) return bonus + 3;
         return bonus - 12;
       }, 0);
+      const sectionBonus = [...candidateSections].reduce((bonus, section) => {
+        const covered = sectionCoverageMap.get(section) || 0;
+        if (covered === 0) return bonus + 14;
+        if (covered === 1) return bonus + 4;
+        return bonus - 6;
+      }, 0);
       const adjustedScore =
         candidate.score +
         (candidate.historicalFit.averageMatches * 6) +
         coverageBonus -
-        overlapPenalty -
+        overlapPenalty +
+        sectionBonus -
         reusePenalty -
         (overusedCount * 135);
 
@@ -1184,6 +1198,9 @@ function pickDiversifiedRecommendations(candidates) {
     selected.push(chosen);
     chosen.numbers.forEach((number) => {
       usageMap.set(number, (usageMap.get(number) || 0) + 1);
+    });
+    new Set(chosen.numbers.map((number) => Math.floor((number - 1) / 10))).forEach((section) => {
+      sectionCoverageMap.set(section, (sectionCoverageMap.get(section) || 0) + 1);
     });
   }
 
@@ -1630,6 +1647,17 @@ function getCorePayloadFromCache(draws) {
   return null;
 }
 
+function getCachedBacktestPayload(draws) {
+  const cache = readAppCache();
+  const status = getCalculationStatus(draws, cache);
+
+  if (status.backtestFresh && cache.backtest?.payload) {
+    return cache.backtest.payload;
+  }
+
+  return null;
+}
+
 function storeCorePayload(draws, payload) {
   const cache = readAppCache();
   const { latestRound } = getLatestDrawMeta(draws);
@@ -1653,6 +1681,27 @@ function storeBacktestPayload(draws, payload) {
   writeAppCache(cache);
 }
 
+function getOrBuildCorePayload(draws, options = {}) {
+  const luckEnabled = normalizeLuckEnabled(options.luckEnabled);
+  if (!luckEnabled) {
+    const cached = getCorePayloadFromCache(draws);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  const payload = buildCorePayload(draws, {
+    ...options,
+    luckEnabled
+  });
+
+  if (!luckEnabled) {
+    storeCorePayload(draws, payload);
+  }
+
+  return payload;
+}
+
 function invalidateCalculationCache() {
   const cache = readAppCache();
   cache.core = null;
@@ -1662,15 +1711,12 @@ function invalidateCalculationCache() {
 
 function sendAppState(res) {
   const draws = readDraws().sort((a, b) => b.round - a.round);
-  const cachedCore = getCorePayloadFromCache(draws);
-  const corePayload = cachedCore || buildCorePayload(draws);
-  if (!cachedCore) {
-    storeCorePayload(draws, corePayload);
-  }
+  const corePayload = getOrBuildCorePayload(draws);
   const syncState = readSyncState();
-  const calcStatus = getCalculationStatus(draws);
+  const cache = readAppCache();
+  const cachedBacktest = getCachedBacktestPayload(draws);
+  const calcStatus = getCalculationStatus(draws, cache);
   const latestMeta = getLatestDrawMeta(draws);
-  const appCache = readAppCache();
 
   res.json({
     draws,
@@ -1679,7 +1725,7 @@ function sendAppState(res) {
     recommendations: corePayload.recommendations,
     customRecommendation: corePayload.customRecommendation,
     targetRange: corePayload.targetRange,
-    backtest: appCache.backtest?.payload || null,
+    backtest: cachedBacktest,
     sync: syncState,
     calcStatus,
     latestMeta,
@@ -1727,8 +1773,10 @@ app.get("/health", (_req, res) => {
 app.get("/api/lotto", async (_req, res) => {
   try {
     const draws = await getAvailableDraws(false);
-    const payload = buildCorePayload(draws);
+    const payload = getOrBuildCorePayload(draws);
     const syncState = readSyncState();
+    const cache = readAppCache();
+    const cachedBacktest = getCachedBacktestPayload(draws);
 
     res.json({
       draws,
@@ -1737,7 +1785,10 @@ app.get("/api/lotto", async (_req, res) => {
       recommendations: payload.recommendations,
       customRecommendation: payload.customRecommendation,
       targetRange: payload.targetRange,
+      backtest: cachedBacktest,
       sync: syncState,
+      calcStatus: getCalculationStatus(draws, cache),
+      latestMeta: getLatestDrawMeta(draws),
       limits: {
         min: LOTTO_MIN,
         max: LOTTO_MAX,
@@ -1795,12 +1846,9 @@ app.post("/api/lotto/recommendations", async (req, res) => {
   try {
     const draws = await getAvailableDraws(false);
     const luckEnabled = normalizeLuckEnabled(req.body?.luckEnabled);
-    const payload = buildCorePayload(draws, {
+    const payload = getOrBuildCorePayload(draws, {
       luckEnabled
     });
-    if (!luckEnabled) {
-      storeCorePayload(draws, payload);
-    }
     res.json({
       recommendations: payload.recommendations,
       targetRange: payload.targetRange,
@@ -1882,11 +1930,6 @@ app.post("/api/lotto/sync", async (_req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message || "최신 데이터를 동기화하지 못했습니다." });
   }
-});
-
-app.get("/health", (_req, res) => {
-  ensureStorage();
-  res.json({ ok: true });
 });
 
 app.listen(port, "0.0.0.0", () => {

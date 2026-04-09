@@ -625,7 +625,7 @@ function syncApp(payload) {
   state.targetRange = payload.targetRange || null;
   state.calcStatus = payload.calcStatus || null;
   state.latestMeta = payload.latestMeta || null;
-  state.backtest = payload.backtest || state.backtest;
+  state.backtest = payload.backtest ?? null;
   syncCaptionEl.textContent = formatSyncLabel(payload.sync);
 
   populateNumberOptions(targetFixedNumberEl, "포함");
@@ -635,10 +635,10 @@ function syncApp(payload) {
   updateCalcButtons();
   applyTargetRange();
   renderSummary();
+  renderRecommendations();
   renderCustomRecommendation();
   renderQuickPicks();
   renderNumberRanking();
-  renderRecommendations();
   deferRender(() => {
     renderSections();
     renderInsights();
@@ -750,6 +750,12 @@ async function fetchApp() {
 }
 
 async function fetchBacktest() {
+  if (state.backtest && state.calcStatus?.backtestFresh) {
+    deferRender(renderBacktest);
+    setLoadingState("로딩 완료", "저장된 분석과 백테스트까지 준비되었습니다.", 100, "done");
+    return;
+  }
+
   backtestCaptionEl.textContent = "저장된 백테스트를 확인하는 중입니다...";
   const payload = await sendJsonWithRetry("/api/lotto/backtest", {}, { retries: 2, delayMs: 2000 });
   state.backtest = payload.backtest || null;
@@ -817,9 +823,9 @@ async function onGenerateClick() {
     updateCalcButtons();
     applyTargetRange();
     renderSummary();
+    renderRecommendations();
     renderCustomRecommendation();
     renderQuickPicks();
-    renderRecommendations();
   } catch (error) {
     statusMessageEl.textContent = error.message;
   } finally {
@@ -847,9 +853,9 @@ async function onRefreshClick() {
     updateCalcButtons();
     applyTargetRange();
     renderSummary();
+    renderRecommendations();
     renderCustomRecommendation();
     renderQuickPicks();
-    renderRecommendations();
 
     advanceActionProgress("분석 시작", "추천 계산이 끝났습니다. 백테스트를 이어서 계산합니다.", 74);
     const backtestPayload = await sendJson("/api/lotto/backtest", {
