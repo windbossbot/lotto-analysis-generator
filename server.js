@@ -27,8 +27,8 @@ const TARGET_HIT3_RATE_STEP = 0.1;
 const LUCK_FACTOR_RATIO = 0.1;
 const CORE_RECALC_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const WEIGHT_FLATTEN_EXPONENT = 0.84;
-const REUSE_PENALTY_PER_PICK = 18;
-const MAX_NUMBER_USAGE_PER_BATCH = 2;
+const REUSE_PENALTY_PER_PICK = 28;
+const MAX_NUMBER_USAGE_PER_BATCH = 3;
 const PRIME_NUMBERS = new Set([2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43]);
 const BACKTEST_CONFIG_KEY = `${BACKTEST_ROUNDS}:${BACKTEST_WARMUP_DRAWS}:${BACKTEST_CANDIDATE_POOL_SIZE}`;
 let drawsMemoryCache = null;
@@ -70,10 +70,45 @@ function ensureStorage() {
   if (!fs.existsSync(appCacheFile)) {
     fs.writeFileSync(
       appCacheFile,
-      `${JSON.stringify({ core: null, backtest: null }, null, 2)}\n`,
+      `${JSON.stringify({ recommendations_no_luck: null, recommendations_luck: null, backtest: null }, null, 2)}\n`,
       "utf8"
     );
   }
+}
+
+function getRecommendationCacheKey(luckEnabled) {
+  return luckEnabled ? "recommendations_luck" : "recommendations_no_luck";
+}
+
+function normalizeAppCache(cache) {
+  const normalized = cache && typeof cache === "object" ? { ...cache } : {};
+
+  if (normalized.core && !normalized.recommendations_no_luck && !normalized.recommendations_luck) {
+    if (normalized.core.payload) {
+      normalized.recommendations_no_luck = normalized.core;
+    } else if (normalized.core.no_luck || normalized.core.luck) {
+      normalized.recommendations_no_luck = normalized.core.no_luck || null;
+      normalized.recommendations_luck = normalized.core.luck || null;
+    }
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(normalized, "recommendations_no_luck")) {
+    normalized.recommendations_no_luck = null;
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(normalized, "recommendations_luck")) {
+    normalized.recommendations_luck = null;
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(normalized, "backtest")) {
+    normalized.backtest = null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(normalized, "core")) {
+    delete normalized.core;
+  }
+
+  return normalized;
 }
 
 function readDraws() {
@@ -111,14 +146,14 @@ function writeSyncState(syncState) {
 function readAppCache() {
   ensureStorage();
   if (appCacheMemory) {
-    return JSON.parse(JSON.stringify(appCacheMemory));
+    return JSON.parse(JSON.stringify(normalizeAppCache(appCacheMemory)));
   }
 
   const raw = fs.readFileSync(appCacheFile, "utf8");
   try {
-    appCacheMemory = JSON.parse(raw);
+    appCacheMemory = normalizeAppCache(JSON.parse(raw));
   } catch {
-    appCacheMemory = { core: null, backtest: null };
+    appCacheMemory = normalizeAppCache({});
   }
 
   return JSON.parse(JSON.stringify(appCacheMemory));
@@ -126,8 +161,8 @@ function readAppCache() {
 
 function writeAppCache(cache) {
   ensureStorage();
-  appCacheMemory = JSON.parse(JSON.stringify(cache));
-  fs.writeFileSync(appCacheFile, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
+  appCacheMemory = normalizeAppCache(JSON.parse(JSON.stringify(cache)));
+  fs.writeFileSync(appCacheFile, `${JSON.stringify(appCacheMemory, null, 2)}\n`, "utf8");
 }
 
 function sortNumbers(numbers) {
@@ -583,6 +618,36 @@ function isArithmeticProgression(numbers) {
   return true;
 }
 
+function hasArithmeticProgressionOfLength(numbers, targetLength) {
+  const sorted = sortNumbers(numbers);
+  if (sorted.length < targetLength || targetLength < 3) {
+    return false;
+  }
+
+  const valueSet = new Set(sorted);
+  for (let start = 0; start < sorted.length; start += 1) {
+    for (let next = start + 1; next < sorted.length; next += 1) {
+      const step = sorted[next] - sorted[start];
+      let current = sorted[next];
+      let length = 2;
+
+      while (length < targetLength) {
+        current += step;
+        if (!valueSet.has(current)) {
+          break;
+        }
+        length += 1;
+      }
+
+      if (length >= targetLength) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function weightedNumberPool(stats) {
   return stats.map((item) => {
     const coldBoost = Math.min(6, item.missCount) * 1.6;
@@ -606,7 +671,9 @@ function buildWeightedProfile(draws) {
   const pairScores = new Map();
 
   sortedDraws.forEach((draw, drawIndex) => {
-    const recencyWeight = Math.max(0.15, 1 - drawIndex * 0.018);
+    const age = drawIndex + 1;
+    const ageWeight = age <= 30 ? 1 : age <= 60 ? 0.7 : age <= 100 ? 0.4 : 0.25;
+    const recencyWeight = Math.max(0.15, (1 - drawIndex * 0.018) * ageWeight);
 
     draw.numbers.forEach((number) => {
       const target = stats[number - 1];
@@ -638,13 +705,14 @@ function scoreNumbersFromHistory(draws, options = {}) {
     const weighted = weightedProfile.stats[index];
     const hotBonus = hotSet.has(base.number) ? 4 : 0;
     const coldBonus = coldSet.has(base.number) ? 3 : 0;
-    const overdueBonus = Math.min(12, base.missCount * 0.65);
+    const overdueBonus = Math.min(18, base.missCount * 0.85);
+    const superColdBonus = base.missCount >= 25 ? 8 : 0;
     const weightedBonus = weighted.weightedCount * 1.35;
     const recentBonus = weighted.recentCount * 1.4;
 
     return {
       number: base.number,
-      score: Number((weightedBonus + recentBonus + overdueBonus + hotBonus + coldBonus).toFixed(3))
+      score: Number((weightedBonus + recentBonus + overdueBonus + superColdBonus + hotBonus + coldBonus).toFixed(3))
     };
   });
 }
@@ -1054,6 +1122,7 @@ function scoreCandidate(numbers, context) {
   const consecutivePairs = sorted.slice(1).filter((number, index) => number - sorted[index] === 1).length;
   const longestConsecutiveRun = getLongestConsecutiveRun(sorted);
   const arithmeticProgression = isArithmeticProgression(sorted);
+  const fourNumberArithmetic = hasArithmeticProgressionOfLength(sorted, 4);
   const maxGap = getMaxGap(sorted);
   const sections = new Set(sorted.map((number) => Math.floor((number - 1) / 10))).size;
   const acValue = calculateAcValue(sorted);
@@ -1103,7 +1172,8 @@ function scoreCandidate(numbers, context) {
   patternScore -= Math.max(0, maxRepeatedEndDigit - 2) * 11;
   patternScore -= Math.max(0, topRankCount - 3) * 10;
   patternScore -= Math.max(0, carryCount - 2) * 8;
-  patternScore -= arithmeticProgression ? 52 : 0;
+  patternScore -= arithmeticProgression ? 28 : 0;
+  patternScore -= !arithmeticProgression && fourNumberArithmetic ? 15 : 0;
   patternScore += endDigitSet.size >= 5 ? 8 : 0;
   patternScore += coldCount >= 1 && coldCount <= 2 ? 5 : 0;
   patternScore += warmCount >= 2 && warmCount <= 4 ? 7 : warmCount === 0 ? -5 : 0;
@@ -1112,7 +1182,7 @@ function scoreCandidate(numbers, context) {
     patternScore -= 120;
   }
 
-  const deterministicScore = (numberScore * 2.2) + (backtestScore * 1.55) + (pairScore * 5.2) + patternScore;
+  const deterministicScore = (numberScore * 2.2) + (backtestScore * 2.2) + (pairScore * 3.5) + patternScore;
   const luckScore = luckEnabled
     ? Number((deterministicScore * luckFactor * Math.max(0, Math.min(1, random()))).toFixed(2))
     : 0;
@@ -1179,13 +1249,27 @@ function pickDiversifiedRecommendations(candidates) {
         if (covered === 1) return bonus + 4;
         return bonus - 6;
       }, 0);
+      const adjacentUncoveredSectionBonus = [...candidateSections]
+        .sort((a, b) => a - b)
+        .reduce((bonus, section, sectionIndex, sections) => {
+          const nextSection = sections[sectionIndex + 1];
+          if (
+            nextSection === section + 1 &&
+            (sectionCoverageMap.get(section) || 0) === 0 &&
+            (sectionCoverageMap.get(nextSection) || 0) === 0
+          ) {
+            return bonus + 20;
+          }
+          return bonus;
+        }, 0);
       const adjustedScore =
         candidate.score +
         (candidate.historicalFit.averageMatches * 6) +
         coverageBonus -
         overlapPenalty +
         sectionBonus -
-        reusePenalty -
+        reusePenalty +
+        adjacentUncoveredSectionBonus -
         (overusedCount * 135);
 
       if (adjustedScore > bestAdjustedScore) {
@@ -1615,9 +1699,10 @@ function isCacheFresh(generatedAt) {
   return Date.now() - date.getTime() < CORE_RECALC_INTERVAL_MS;
 }
 
-function getCalculationStatus(draws, cache = readAppCache()) {
+function getCalculationStatus(draws, cache = readAppCache(), options = {}) {
   const { latestRound } = getLatestDrawMeta(draws);
-  const core = cache.core;
+  const luckEnabled = normalizeLuckEnabled(options.luckEnabled);
+  const core = cache[getRecommendationCacheKey(luckEnabled)];
   const backtest = cache.backtest;
   const backtestCurrent = Boolean(backtest?.payload) &&
     backtest.sourceRound === latestRound &&
@@ -1636,12 +1721,14 @@ function getCalculationStatus(draws, cache = readAppCache()) {
   };
 }
 
-function getCorePayloadFromCache(draws) {
+function getCorePayloadFromCache(draws, options = {}) {
   const cache = readAppCache();
-  const status = getCalculationStatus(draws, cache);
+  const luckEnabled = normalizeLuckEnabled(options.luckEnabled);
+  const status = getCalculationStatus(draws, cache, { luckEnabled });
+  const core = cache[getRecommendationCacheKey(luckEnabled)];
 
-  if (status.coreFresh && cache.core?.payload) {
-    return cache.core.payload;
+  if (status.coreFresh && core?.payload) {
+    return core.payload;
   }
 
   return null;
@@ -1658,10 +1745,11 @@ function getCachedBacktestPayload(draws) {
   return null;
 }
 
-function storeCorePayload(draws, payload) {
+function storeCorePayload(draws, payload, options = {}) {
   const cache = readAppCache();
   const { latestRound } = getLatestDrawMeta(draws);
-  cache.core = {
+  const luckEnabled = normalizeLuckEnabled(options.luckEnabled);
+  cache[getRecommendationCacheKey(luckEnabled)] = {
     sourceRound: latestRound,
     generatedAt: new Date().toISOString(),
     payload
@@ -1683,11 +1771,9 @@ function storeBacktestPayload(draws, payload) {
 
 function getOrBuildCorePayload(draws, options = {}) {
   const luckEnabled = normalizeLuckEnabled(options.luckEnabled);
-  if (!luckEnabled) {
-    const cached = getCorePayloadFromCache(draws);
-    if (cached) {
-      return cached;
-    }
+  const cached = getCorePayloadFromCache(draws, { luckEnabled });
+  if (cached) {
+    return cached;
   }
 
   const payload = buildCorePayload(draws, {
@@ -1695,27 +1781,26 @@ function getOrBuildCorePayload(draws, options = {}) {
     luckEnabled
   });
 
-  if (!luckEnabled) {
-    storeCorePayload(draws, payload);
-  }
+  storeCorePayload(draws, payload, { luckEnabled });
 
   return payload;
 }
 
 function invalidateCalculationCache() {
   const cache = readAppCache();
-  cache.core = null;
+  cache.recommendations_no_luck = null;
+  cache.recommendations_luck = null;
   cache.backtest = null;
   writeAppCache(cache);
 }
 
 function sendAppState(res) {
   const draws = readDraws().sort((a, b) => b.round - a.round);
-  const corePayload = getOrBuildCorePayload(draws);
+  const corePayload = getOrBuildCorePayload(draws, { luckEnabled: false });
   const syncState = readSyncState();
   const cache = readAppCache();
   const cachedBacktest = getCachedBacktestPayload(draws);
-  const calcStatus = getCalculationStatus(draws, cache);
+  const calcStatus = getCalculationStatus(draws, cache, { luckEnabled: false });
   const latestMeta = getLatestDrawMeta(draws);
 
   res.json({
@@ -1773,7 +1858,7 @@ app.get("/health", (_req, res) => {
 app.get("/api/lotto", async (_req, res) => {
   try {
     const draws = await getAvailableDraws(false);
-    const payload = getOrBuildCorePayload(draws);
+    const payload = getOrBuildCorePayload(draws, { luckEnabled: false });
     const syncState = readSyncState();
     const cache = readAppCache();
     const cachedBacktest = getCachedBacktestPayload(draws);
@@ -1787,7 +1872,7 @@ app.get("/api/lotto", async (_req, res) => {
       targetRange: payload.targetRange,
       backtest: cachedBacktest,
       sync: syncState,
-      calcStatus: getCalculationStatus(draws, cache),
+      calcStatus: getCalculationStatus(draws, cache, { luckEnabled: false }),
       latestMeta: getLatestDrawMeta(draws),
       limits: {
         min: LOTTO_MIN,
@@ -1853,7 +1938,7 @@ app.post("/api/lotto/recommendations", async (req, res) => {
       recommendations: payload.recommendations,
       targetRange: payload.targetRange,
       customRecommendation: payload.customRecommendation,
-      calcStatus: getCalculationStatus(draws)
+      calcStatus: getCalculationStatus(draws, readAppCache(), { luckEnabled })
     });
   } catch (error) {
     res.status(500).json({ error: error.message || "추천 조합을 만들지 못했습니다." });
