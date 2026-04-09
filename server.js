@@ -34,6 +34,16 @@ const BACKTEST_CONFIG_KEY = `${BACKTEST_ROUNDS}:${BACKTEST_WARMUP_DRAWS}:${BACKT
 let drawsMemoryCache = null;
 let syncInFlight = null;
 let appCacheMemory = null;
+const calculationWarmupState = {
+  core: {
+    noLuckKey: null,
+    noLuckPromise: null,
+    luckKey: null,
+    luckPromise: null
+  },
+  backtestKey: null,
+  backtestPromise: null
+};
 const snapshotCache = {
   coreKey: null,
   coreValue: null,
@@ -109,6 +119,15 @@ function normalizeAppCache(cache) {
   }
 
   return normalized;
+}
+
+function getDrawSnapshotKey(draws) {
+  const sortedDraws = [...draws].sort((a, b) => b.round - a.round);
+  return `${sortedDraws[0]?.round || 0}:${sortedDraws.length}`;
+}
+
+function getCalculationWarmupKey(draws, kind) {
+  return `${getDrawSnapshotKey(draws)}:${kind}`;
 }
 
 function readDraws() {
@@ -364,6 +383,11 @@ async function performSyncLatestDraws(force = false) {
   writeDraws(merged);
   if (fetchedCount > 0) {
     invalidateCalculationCache();
+    setTimeout(() => {
+      const draws = readDraws().sort((a, b) => b.round - a.round);
+      warmCorePayloadInBackground(draws, { luckEnabled: false }).catch(() => {});
+      warmBacktestInBackground(draws).catch(() => {});
+    }, 0);
   }
   snapshotCache.coreKey = null;
   snapshotCache.coreValue = null;
@@ -1745,6 +1769,102 @@ function getCachedBacktestPayload(draws) {
   return null;
 }
 
+function warmCorePayloadInBackground(draws, options = {}) {
+  const luckEnabled = normalizeLuckEnabled(options.luckEnabled);
+  const key = getCalculationWarmupKey(draws, luckEnabled ? "luck" : "no_luck");
+  const fresh = getCorePayloadFromCache(draws, { luckEnabled });
+
+  if (fresh) {
+    return Promise.resolve(fresh);
+  }
+
+  const stateKey = luckEnabled ? "luck" : "noLuck";
+  const promiseKey = luckEnabled ? "luckPromise" : "noLuckPromise";
+
+  if (calculationWarmupState.core[`${stateKey}Key`] === key && calculationWarmupState.core[promiseKey]) {
+    return calculationWarmupState.core[promiseKey];
+  }
+
+  const startedAt = Date.now();
+  const promise = Promise.resolve().then(() => {
+    return getOrBuildCorePayload(draws, { luckEnabled });
+  }).finally(() => {
+    if (calculationWarmupState.core[`${stateKey}Key`] === key) {
+      calculationWarmupState.core[`${stateKey}Key`] = null;
+      calculationWarmupState.core[promiseKey] = null;
+    }
+    console.log(
+      `Core warmup ${luckEnabled ? "luck" : "no_luck"} completed in ${Date.now() - startedAt}ms`
+    );
+  });
+
+  calculationWarmupState.core[`${stateKey}Key`] = key;
+  calculationWarmupState.core[promiseKey] = promise;
+  return promise;
+}
+
+function warmBacktestInBackground(draws) {
+  const key = getCalculationWarmupKey(draws, "backtest");
+
+  if (getCachedBacktestPayload(draws)) {
+    return Promise.resolve(getCachedBacktestPayload(draws));
+  }
+
+  if (calculationWarmupState.backtestKey === key && calculationWarmupState.backtestPromise) {
+    return calculationWarmupState.backtestPromise;
+  }
+
+  const startedAt = Date.now();
+  const promise = Promise.resolve().then(() => {
+    const payload = buildBacktestSnapshot(draws);
+    storeBacktestPayload(draws, payload);
+    return payload;
+  }).finally(() => {
+    if (calculationWarmupState.backtestKey === key) {
+      calculationWarmupState.backtestKey = null;
+      calculationWarmupState.backtestPromise = null;
+    }
+    console.log(`Backtest warmup completed in ${Date.now() - startedAt}ms`);
+  });
+
+  calculationWarmupState.backtestKey = key;
+  calculationWarmupState.backtestPromise = promise;
+  return promise;
+}
+
+async function resolveCorePayload(draws, options = {}) {
+  const luckEnabled = normalizeLuckEnabled(options.luckEnabled);
+  const cached = getCorePayloadFromCache(draws, { luckEnabled });
+  if (cached) {
+    return cached;
+  }
+
+  const key = getCalculationWarmupKey(draws, luckEnabled ? "luck" : "no_luck");
+  const stateKey = luckEnabled ? "luck" : "noLuck";
+  const promiseKey = luckEnabled ? "luckPromise" : "noLuckPromise";
+  if (calculationWarmupState.core[`${stateKey}Key`] === key && calculationWarmupState.core[promiseKey]) {
+    return calculationWarmupState.core[promiseKey];
+  }
+
+  return getOrBuildCorePayload(draws, { ...options, luckEnabled });
+}
+
+async function resolveBacktestPayload(draws) {
+  const cached = getCachedBacktestPayload(draws);
+  if (cached) {
+    return cached;
+  }
+
+  const key = getCalculationWarmupKey(draws, "backtest");
+  if (calculationWarmupState.backtestKey === key && calculationWarmupState.backtestPromise) {
+    return calculationWarmupState.backtestPromise;
+  }
+
+  const payload = buildBacktestSnapshot(draws);
+  storeBacktestPayload(draws, payload);
+  return payload;
+}
+
 function storeCorePayload(draws, payload, options = {}) {
   const cache = readAppCache();
   const { latestRound } = getLatestDrawMeta(draws);
@@ -1794,12 +1914,12 @@ function invalidateCalculationCache() {
   writeAppCache(cache);
 }
 
-function sendAppState(res) {
+async function sendAppState(res) {
   const draws = readDraws().sort((a, b) => b.round - a.round);
-  const corePayload = getOrBuildCorePayload(draws, { luckEnabled: false });
+  const corePayload = await resolveCorePayload(draws, { luckEnabled: false });
   const syncState = readSyncState();
   const cache = readAppCache();
-  const cachedBacktest = getCachedBacktestPayload(draws);
+  const cachedBacktest = await resolveBacktestPayload(draws);
   const calcStatus = getCalculationStatus(draws, cache, { luckEnabled: false });
   const latestMeta = getLatestDrawMeta(draws);
 
@@ -1858,7 +1978,7 @@ app.get("/health", (_req, res) => {
 app.get("/api/lotto", async (_req, res) => {
   try {
     const draws = await getAvailableDraws(false);
-    const payload = getOrBuildCorePayload(draws, { luckEnabled: false });
+    const payload = await resolveCorePayload(draws, { luckEnabled: false });
     const syncState = readSyncState();
     const cache = readAppCache();
     const cachedBacktest = getCachedBacktestPayload(draws);
@@ -1885,53 +2005,61 @@ app.get("/api/lotto", async (_req, res) => {
   }
 });
 
-app.post("/api/lotto/draws", (req, res) => {
-  const result = validateDrawInput(req.body);
-  if (result.error) {
-    res.status(400).json({ error: result.error });
-    return;
-  }
+app.post("/api/lotto/draws", async (req, res) => {
+  try {
+    const result = validateDrawInput(req.body);
+    if (result.error) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
 
-  const draws = readDraws();
-  if (draws.some((draw) => draw.round === result.value.round)) {
-    res.status(400).json({ error: "같은 회차가 이미 저장되어 있습니다." });
-    return;
-  }
+    const draws = readDraws();
+    if (draws.some((draw) => draw.round === result.value.round)) {
+      res.status(400).json({ error: "같은 회차가 이미 저장되어 있습니다." });
+      return;
+    }
 
-  draws.push(result.value);
-  writeDraws(draws.sort((a, b) => a.round - b.round));
-  invalidateCalculationCache();
-  snapshotCache.coreKey = null;
-  snapshotCache.coreValue = null;
-  snapshotCache.backtestKey = null;
-  snapshotCache.backtestValue = null;
-  sendAppState(res);
+    draws.push(result.value);
+    writeDraws(draws.sort((a, b) => a.round - b.round));
+    invalidateCalculationCache();
+    snapshotCache.coreKey = null;
+    snapshotCache.coreValue = null;
+    snapshotCache.backtestKey = null;
+    snapshotCache.backtestValue = null;
+    await sendAppState(res);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "회차를 저장하지 못했습니다." });
+  }
 });
 
-app.delete("/api/lotto/draws/:round", (req, res) => {
-  const round = Number(req.params.round);
-  const draws = readDraws();
-  const nextDraws = draws.filter((draw) => draw.round !== round);
+app.delete("/api/lotto/draws/:round", async (req, res) => {
+  try {
+    const round = Number(req.params.round);
+    const draws = readDraws();
+    const nextDraws = draws.filter((draw) => draw.round !== round);
 
-  if (nextDraws.length === draws.length) {
-    res.status(404).json({ error: "삭제할 회차를 찾지 못했습니다." });
-    return;
+    if (nextDraws.length === draws.length) {
+      res.status(404).json({ error: "삭제할 회차를 찾지 못했습니다." });
+      return;
+    }
+
+    writeDraws(nextDraws.sort((a, b) => a.round - b.round));
+    invalidateCalculationCache();
+    snapshotCache.coreKey = null;
+    snapshotCache.coreValue = null;
+    snapshotCache.backtestKey = null;
+    snapshotCache.backtestValue = null;
+    await sendAppState(res);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "회차를 삭제하지 못했습니다." });
   }
-
-  writeDraws(nextDraws.sort((a, b) => a.round - b.round));
-  invalidateCalculationCache();
-  snapshotCache.coreKey = null;
-  snapshotCache.coreValue = null;
-  snapshotCache.backtestKey = null;
-  snapshotCache.backtestValue = null;
-  sendAppState(res);
 });
 
 app.post("/api/lotto/recommendations", async (req, res) => {
   try {
     const draws = await getAvailableDraws(false);
     const luckEnabled = normalizeLuckEnabled(req.body?.luckEnabled);
-    const payload = getOrBuildCorePayload(draws, {
+    const payload = await resolveCorePayload(draws, {
       luckEnabled
     });
     res.json({
@@ -1979,9 +2107,10 @@ app.get("/api/lotto/backtest", async (_req, res) => {
   try {
     const draws = await getAvailableDraws(false);
     const cache = readAppCache();
+    const payload = await resolveBacktestPayload(draws);
     res.json({
-      backtest: cache.backtest?.payload || null,
-      calcStatus: getCalculationStatus(draws, cache)
+      backtest: payload,
+      calcStatus: getCalculationStatus(draws, readAppCache())
     });
   } catch (error) {
     res.status(500).json({ error: error.message || "백테스트를 수행하지 못했습니다." });
@@ -1991,11 +2120,10 @@ app.get("/api/lotto/backtest", async (_req, res) => {
 app.post("/api/lotto/backtest", async (_req, res) => {
   try {
     const draws = await getAvailableDraws(false);
-    const payload = buildBacktestSnapshot(draws);
-    storeBacktestPayload(draws, payload);
+    const payload = await resolveBacktestPayload(draws);
     res.json({
       backtest: payload,
-      calcStatus: getCalculationStatus(draws)
+      calcStatus: getCalculationStatus(draws, readAppCache())
     });
   } catch (error) {
     res.status(500).json({ error: error.message || "남은 계산을 마무리하지 못했습니다." });
@@ -2009,7 +2137,7 @@ app.post("/api/lotto/sync", async (_req, res) => {
     res.json({
       sync: syncState,
       latestMeta: getLatestDrawMeta(draws),
-      calcStatus: getCalculationStatus(draws),
+      calcStatus: getCalculationStatus(draws, readAppCache()),
       updated: true
     });
   } catch (error) {
@@ -2020,6 +2148,11 @@ app.post("/api/lotto/sync", async (_req, res) => {
 app.listen(port, "0.0.0.0", () => {
   ensureStorage();
   console.log(`Lotto analyzer listening on http://0.0.0.0:${port}`);
+  setTimeout(() => {
+    const draws = readDraws().sort((a, b) => b.round - a.round);
+    warmCorePayloadInBackground(draws, { luckEnabled: false }).catch(() => {});
+    warmBacktestInBackground(draws).catch(() => {});
+  }, 0);
   setTimeout(() => {
     refreshDrawsInBackground(false);
   }, 3000);
